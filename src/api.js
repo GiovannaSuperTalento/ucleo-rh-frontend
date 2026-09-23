@@ -1,5 +1,5 @@
 // src/api.js
-const API_BASE = "http://localhost:4000/api";
+export const API_BASE = import.meta.env.VITE_API_URL || "https://ucleo-rh-backend-production.up.railway.app/api";
 
 // 🟢 Interceptor seguro: No expulsa al usuario ante errores de expedientes
 const handleResponse = async (res, defaultErrorMsg) => {
@@ -11,18 +11,21 @@ const handleResponse = async (res, defaultErrorMsg) => {
   }
   return data;
 };
-export const API_BASE = import.meta.env.VITE_API_URL || "https://api.tu-dominio-nucleorh.com/api";
+
 // Helper de formateo de fotos
 export const formatPhotoUrl = (url) => {
   if (!url || typeof url !== "string" || url === "null" || url === "undefined") return null;
   if (url.startsWith("data:image")) return url;
+  
+  const baseUrl = API_BASE.replace(/\/api$/, "");
+  
   if (url.includes("/uploads/")) {
     const filename = url.split("/uploads/").pop();
-    return `http://localhost:4000/uploads/${filename}`;
+    return `${baseUrl}/uploads/${filename}`;
   }
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
   const cleanPath = url.startsWith("/") ? url : `/${url}`;
-  return `http://localhost:4000${cleanPath}`;
+  return `${baseUrl}${cleanPath}`;
 };
 
 export const api = {
@@ -459,7 +462,8 @@ export const api = {
       },
       body: JSON.stringify({ scheduled_at }),
     }).then((res) => handleResponse(res, "Error al programar la publicación.")),
-    // 🟢 FASE 6: Métodos de Distribución Multigrupo
+
+  // 🟢 FASE 6: Métodos de Distribución Multigrupo
   getPostGroups: (token, postId) =>
     fetch(`${API_BASE}/social-publications/posts/${postId}/groups`, {
       headers: { Authorization: `Bearer ${token}` },
