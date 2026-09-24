@@ -1,5 +1,5 @@
 // src/api.js
-export const API_BASE = import.meta.env.VITE_API_URL || "https://ucleo-rh-backend-production.up.railway.app/api";
+export const API_BASE = import.meta.env.VITE_API_URL || "https://ucleo-rh-backend-production.up.railway.app";
 
 // 🟢 Interceptor seguro: No expulsa al usuario ante errores de expedientes
 const handleResponse = async (res, defaultErrorMsg) => {

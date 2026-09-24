@@ -12,6 +12,7 @@ import StickyNotes from "./components/dashboard/StickyNotes";
 import { PdfSplitModal } from "./components/PdfSplitModal";
 import { SocialPublicationsModule } from "./components/SocialPublicationsModule";
 import { Share2 } from "lucide-react"; // Agregar icono Share2
+import { API_BASE } from "./api";
 const C = {
   bg: "#F3F5F4", surface: "#FFFFFF", ink: "#1B2A2E", inkSoft: "#5B6B6E", line: "#E1E6E4",
   primary: "#1B4B43", primarySoft: "#E7EFEC", accent: "#C6793D", accentSoft: "#FBEBDC",
@@ -27,10 +28,10 @@ function getCleanPhotoUrl(url) {
   if (clean.startsWith("data:image")) return clean;
   if (clean.includes("/uploads/")) {
     const filename = clean.split("/uploads/").pop();
-    return `http://localhost:4000/uploads/${filename}`;
+    return `${API_BASE}/uploads/${filename}`;
   }
   if (clean.startsWith("http://") || clean.startsWith("https://")) return clean;
-  return `http://localhost:4000${clean.startsWith("/") ? clean : `/${clean}`}`;
+  return `${API_BASE}${clean.startsWith("/") ? clean : `/${clean}`}`;
 }
 
 // 🟢 HELPER COMPARADOR SEGURO DE UUIDS DE EMPRESAS Y COLABORADORES
@@ -331,7 +332,7 @@ function AppInner() {
   async function loadCompanies() {
     setCompaniesLoading(true);
     try {
-      const res = await fetch("http://localhost:4000/api/companies", {
+      const res = await fetch("${API_BASE}/api/companies", {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
@@ -339,7 +340,7 @@ function AppInner() {
         const companiesWithTemplates = await Promise.all(data.map(async (c) => {
           const cleanCompany = { ...c, id: String(c.id).trim() };
           try {
-            const tmplRes = await fetch(`http://localhost:4000/api/companies/${cleanCompany.id}/templates`, {
+            const tmplRes = await fetch(`${API_BASE}/api/companies/${cleanCompany.id}/templates`, {
               headers: { Authorization: `Bearer ${token}` }
             });
             if (tmplRes.ok) {
@@ -362,7 +363,7 @@ function AppInner() {
   async function handleDeleteCompanyTemplate(templateId) {
     if (!window.confirm("¿Estás seguro de eliminar esta plantilla? Esta acción no se puede deshacer.")) return;
     try {
-      const res = await fetch(`http://localhost:4000/api/companies/templates/${templateId}`, {
+      const res = await fetch(`${API_BASE}/api/companies/templates/${templateId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -395,15 +396,15 @@ function AppInner() {
     setLeaveLoading(true);
     try {
       const [requests, types] = await Promise.all([
-        api.getLeaveRequests ? api.getLeaveRequests(token) : fetch("http://localhost:4000/api/leaves/requests", { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
-        api.getLeaveTypes ? api.getLeaveTypes(token) : fetch("http://localhost:4000/api/leave-types", { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json())
+        api.getLeaveRequests ? api.getLeaveRequests(token) : fetch("${API_BASE}/api/leaves/requests", { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
+        api.getLeaveTypes ? api.getLeaveTypes(token) : fetch("${API_BASE}/api/leave-types", { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json())
       ]);
       setLeaveRequests(Array.isArray(requests) ? requests : []);
       setLeaveTypes(Array.isArray(types) ? types : []);
       
       const balance = api.getMyLeaveBalance 
         ? await api.getMyLeaveBalance(token)
-        : await fetch("http://localhost:4000/api/leaves/my-balance", { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
+        : await fetch("${API_BASE}/api/leaves/my-balance", { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
       setMyBalance(Array.isArray(balance) ? balance[0] : balance || null);
     } catch (err) {
       console.error("Error al cargar datos de vacaciones:", err);
@@ -423,7 +424,7 @@ function AppInner() {
       if (api.requestLeave) {
         await api.requestLeave(token, leaveForm);
       } else {
-        const response = await fetch("http://localhost:4000/api/leaves/request", {
+        const response = await fetch("${API_BASE}/api/leaves/request", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -692,7 +693,7 @@ function AppInner() {
       if (res && res.file_url) {
         const fullUrl = res.file_url.startsWith("http") 
           ? res.file_url 
-          : `http://localhost:4000${res.file_url.startsWith('/') ? '' : '/'}${res.file_url}`;
+          : `${API_BASE}${res.file_url.startsWith('/') ? '' : '/'}${res.file_url}`;
         
         const link = document.createElement("a");
         link.href = fullUrl;
@@ -716,8 +717,8 @@ function AppInner() {
     setCompanySaveError("");
 
     const url = editingCompany
-      ? `http://localhost:4000/api/companies/${editingCompany.id}`
-      : "http://localhost:4000/api/companies";
+      ? `${API_BASE}/api/companies/${editingCompany.id}`
+      : "${API_BASE}/api/companies";
     const method = editingCompany ? "PUT" : "POST";
 
     try {
@@ -746,7 +747,7 @@ function AppInner() {
   async function deleteCompany(companyId) {
     if (!window.confirm("¿Estás seguro de eliminar esta empresa?")) return;
     try {
-      const res = await fetch(`http://localhost:4000/api/companies/${companyId}`, {
+      const res = await fetch(`${API_BASE}/api/companies/${companyId}`, {
         method: "DELETE",
         headers: { "Authorization": `Bearer ${token}` }
       });
@@ -766,7 +767,7 @@ function AppInner() {
     if (!deptName || !deptName.trim()) return;
 
     try {
-      const res = await fetch(`http://localhost:4000/api/companies/${companyId}/departments`, {
+      const res = await fetch(`${API_BASE}/api/companies/${companyId}/departments`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -787,7 +788,7 @@ function AppInner() {
   async function handleDeleteDept(deptId) {
     if (!window.confirm("¿Eliminar este departamento?")) return;
     try {
-      const res = await fetch(`http://localhost:4000/api/companies/departments/${deptId}`, {
+      const res = await fetch(`${API_BASE}/api/companies/departments/${deptId}`, {
         method: "DELETE",
         headers: { "Authorization": `Bearer ${token}` }
       });
@@ -1737,7 +1738,7 @@ async function exportBajasToExcel() {
                                       formData.append("sub_type", subTypeVal);
 
                                       try {
-                                        const res = await fetch(`http://localhost:4000/api/companies/${c.id}/upload-template`, {
+                                        const res = await fetch(`${API_BASE}/api/companies/${c.id}/upload-template`, {
                                           method: "POST",
                                           headers: { Authorization: `Bearer ${token}` },
                                           body: formData
@@ -2727,7 +2728,7 @@ async function exportBajasToExcel() {
                     try {
                       alert("⏳ Procesando y empaquetando todos los documentos en formato ZIP...");
 
-                      const response = await fetch(`http://localhost:4000/api/companies/${compId}/fill-template-batch`, {
+                      const response = await fetch(`${API_BASE}/api/companies/${compId}/fill-template-batch`, {
                         method: "POST",
                         headers: {
                           "Content-Type": "application/json",
@@ -2998,7 +2999,7 @@ function LeaveModule({ token, isAdmin, myBalance, leaveRequests, leaveTypes, lea
 
   useEffect(() => {
     setLoadingCalendar(true);
-    fetch("http://localhost:4000/api/leaves/department-calendar", {
+    fetch("${API_BASE}/api/leaves/department-calendar", {
       headers: { Authorization: `Bearer ${token}` }
     })
       .then(res => res.json())
@@ -3586,7 +3587,7 @@ function EmployeeDetail({
 
       formData.append("employee_data", JSON.stringify(employeeData));
 
-      const response = await fetch(`http://localhost:4000/api/employees/${employee.id}/fill-custom-template`, {
+      const response = await fetch(`${API_BASE}/api/employees/${employee.id}/fill-custom-template`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`
@@ -3611,7 +3612,7 @@ function EmployeeDetail({
       if (res.file_url) {
         const fullUrl = res.file_url.startsWith("http")
           ? res.file_url
-          : `http://localhost:4000${res.file_url.startsWith("/") ? "" : "/"}${res.file_url}`;
+          : `${API_BASE}${res.file_url.startsWith("/") ? "" : "/"}${res.file_url}`;
         
         const link = document.createElement("a");
         link.href = fullUrl;
@@ -3631,7 +3632,7 @@ function EmployeeDetail({
   async function handleMoveFile(fileId, newCategory) {
     if (!newCategory || !employee) return;
     try {
-      const res = await fetch(`http://localhost:4000/api/employees/${employee.id}/files/${fileId}/move`, {
+      const res = await fetch(`${API_BASE}/api/employees/${employee.id}/files/${fileId}/move`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -3729,7 +3730,7 @@ function EmployeeDetail({
                 type="button"
                 onClick={async () => {
                   try {
-                    const response = await fetch(`http://localhost:4000/api/employees/${employee.id}/download-all`, {
+                    const response = await fetch(`${API_BASE}/api/employees/${employee.id}/download-all`, {
                       headers: { Authorization: `Bearer ${token}` }
                     });
 
@@ -3810,7 +3811,7 @@ function EmployeeDetail({
                           type="button"
                           onClick={async () => {
                             try {
-                              const tmplRes = await fetch(`http://localhost:4000/api/companies/${employee.company_id}/templates`, {
+                              const tmplRes = await fetch(`${API_BASE}/api/companies/${employee.company_id}/templates`, {
                                 headers: { Authorization: `Bearer ${token}` }
                               });
                               const compTemplates = tmplRes.ok ? await tmplRes.json() : [];
@@ -3841,7 +3842,7 @@ function EmployeeDetail({
 
                               alert(`⏳ Generando ${docType} (${selectedSubType || 'General'}) para ${employee.first_name}...`);
 
-                              const response = await fetch(`http://localhost:4000/api/companies/${employee.company_id}/fill-template`, {
+                              const response = await fetch(`${API_BASE}/api/companies/${employee.company_id}/fill-template`, {
                                 method: "POST",
                                 headers: {
                                   "Content-Type": "application/json",
@@ -3866,7 +3867,7 @@ function EmployeeDetail({
                               if (res.file_url) {
                                 const fullUrl = res.file_url.startsWith("http")
                                   ? res.file_url
-                                  : `http://localhost:4000${res.file_url.startsWith("/") ? "" : "/"}${res.file_url}`;
+                                  : `${API_BASE}${res.file_url.startsWith("/") ? "" : "/"}${res.file_url}`;
 
                                 const link = document.createElement("a");
                                 link.href = fullUrl;
@@ -3911,7 +3912,7 @@ function EmployeeDetail({
                         const fileTargetUrl = fileUploaded?.file_url || fileUploaded?.url || "";
                         const fullFileUrl = fileTargetUrl.startsWith("http")
                           ? fileTargetUrl
-                          : `http://localhost:4000${fileTargetUrl.startsWith("/") ? "" : "/"}${fileTargetUrl}`;
+                          : `${API_BASE}${fileTargetUrl.startsWith("/") ? "" : "/"}${fileTargetUrl}`;
 
                         return (
                           <div 
@@ -4222,7 +4223,7 @@ function EmployeeDetail({
                 const docTargetUrl = doc.file_url || doc.url || "";
                 const fullDocUrl = docTargetUrl.startsWith("http")
                   ? docTargetUrl
-                  : `http://localhost:4000${docTargetUrl.startsWith("/") ? "" : "/"}${docTargetUrl}`;
+                  : `${API_BASE}${docTargetUrl.startsWith("/") ? "" : "/"}${docTargetUrl}`;
 
                 return (
                   <div key={doc.id} className="flex justify-between items-center text-xs p-2.5 rounded-lg border bg-white" style={{ borderColor: C.line }}>
