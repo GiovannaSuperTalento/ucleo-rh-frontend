@@ -38,7 +38,7 @@ function getCleanPhotoUrl(url) {
 
 // 🟢 HELPER COMPARADOR SEGURO DE UUIDS DE EMPRESAS Y COLABORADORES
 function isSameCompany(employeeOrId, filterCompanyId) {
-  if (!filterCompanyId || filterCompanyId === "all") return true;
+  if (!filterCompanyId) return true; // Corregido: Si no hay filtro, mostrar por defecto
 
   let empCompId = null;
   if (typeof employeeOrId === "object" && employeeOrId !== null) {
@@ -275,20 +275,20 @@ function AppInner() {
 
   const [currentSlide, setCurrentSlide] = useState(0);
 
-  const isAdmin = true; // Forzar visibilidad absoluta para evitar bloqueos
+  const isAdmin = user?.role === "admin" || !user?.role || user?.role === "administrator";
   const resetToken = useMemo(() => new URLSearchParams(window.location.search).get("resetToken"), []);
 
   const filteredEmployees = useMemo(() => {
     if (!Array.isArray(employees)) return [];
     if (employeeStatusTab === "todos") return employees;
-    return employees.filter(e => String(e.employment_status || "activo").toLowerCase() === employeeStatusTab);
+    return employees.filter(e => (e.employment_status || "activo") === employeeStatusTab);
   }, [employees, employeeStatusTab]);
 
   const managerOptions = useMemo(() => {
     if (!Array.isArray(employees)) return [];
     return employees
-      .filter(e => e.employment_status === "activo" && e.id !== editingEmployeeId)
-      .map(e => ({ id: e.id, full_name: `${e.position || 'Sin Puesto'} — ${e.first_name} ${e.last_name || ''}` }));
+      .filter(e => (e.employment_status || "activo") === "activo" && e.id !== editingEmployeeId)
+      .map(e => ({ id: e.id, full_name: `${e.position || 'Sin Puesto'} — ${e.first_name || ''} ${e.last_name || ''}` }));
   }, [employees, editingEmployeeId]);
 
   const availableDepartments = useMemo(() => {
@@ -301,18 +301,17 @@ function AppInner() {
     return Array.from(new Set([...companyDeptNames, ...DEPARTMENTS]));
   }, [companies, newEmployee.company_id]);
 
-  // 🟢 DESESTRUCTURACIÓN DE DATOS TOLERANTE
   async function loadEmployees(search = "") {
     setEmployeesLoading(true);
     setEmployeesError("");
     try {
       const data = await api.getEmployees(token, search);
-      const employeeList = Array.isArray(data) ? data : (data?.employees || data?.data || []);
-      window.listaEmpleados = employeeList;
-      setEmployees(employeeList);
+      const list = Array.isArray(data) ? data : (data?.employees || data?.data || []);
+      window.listaEmpleados = list;
+      setEmployees(list);
     } catch (err) {
       console.error("Error al cargar empleados:", err);
-      setEmployeesError(err.message || "Error al cargar la lista de colaboradores.");
+      setEmployeesError(err.message || "Error al cargar colaboradores.");
     } finally {
       setEmployeesLoading(false);
     }
@@ -342,7 +341,8 @@ function AppInner() {
       });
       if (res.ok) {
         const data = await res.json();
-        const companiesWithTemplates = await Promise.all(data.map(async (c) => {
+        const rawCompanies = Array.isArray(data) ? data : (data?.companies || []);
+        const companiesWithTemplates = await Promise.all(rawCompanies.map(async (c) => {
           const cleanCompany = { ...c, id: String(c.id).trim() };
           try {
             const tmplRes = await fetch(`${API_BASE}/companies/${cleanCompany.id}/templates`, {
@@ -612,7 +612,7 @@ function AppInner() {
       setResetDone(true);
     } catch (err) {
       setResetError(err.message);
-    } fontally {
+    } finally {
       setResetLoading(false);
     }
   }
@@ -1419,8 +1419,6 @@ function AppInner() {
   ];
 
   const pendingCount = leaveRequests.filter(r => r.status === "pendiente").length;
-  const userEmployeeProfile = employees.find(e => e.personal_email === user?.email);
-  const userDept = userEmployeeProfile?.department || user?.department || "Recursos Humanos";
 
   return (
     <div className="min-h-screen w-full flex" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
@@ -1947,139 +1945,483 @@ function AppInner() {
           </div>
         )}
 
-        {/* 🟢 DIRECTORIO DE EMPLEADOS DIRECTO */}
+        {/* 🟢 SECCIÓN EMPLEADOS RENDERIZADA CON PROTECCIÓN TOTAL DE PANTALLA BLANCA */}
         {view === "employees" && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-2xl font-bold text-slate-900">Directorio de Empleados</h1>
-                <p className="text-xs text-slate-500 mt-1">
-                  Consulta el listado completo de colaboradores y gestiona sus expedientes.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3">
-                {companies.length > 0 && (
-                  <select
-                    value={selectedCompanyFilter?.id || "all"}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      if (val === "all") setSelectedCompanyFilter(null);
-                      else {
-                        const c = companies.find(item => String(item.id) === String(val));
-                        setSelectedCompanyFilter(c || null);
-                      }
-                    }}
-                    className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-700 outline-none"
-                  >
-                    <option value="all">Todas las Empresas</option>
-                    {companies.map(c => (
-                      <option key={c.id} value={c.id}>{c.legal_name || c.name}</option>
-                    ))}
-                  </select>
-                )}
-
-                <button
-                  onClick={() => loadEmployees(searchInput)}
-                  className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl text-xs font-bold text-[#1B4B43] bg-[#E7EFEC] hover:bg-[#d8e7e3] transition-all cursor-pointer"
-                >
-                  <RefreshCw size={14} /> Actualizar
+          <div>
+            {showAddEmployee ? (
+              <div className="space-y-6 max-w-4xl">
+                <button onClick={() => setShowAddEmployee(false)} className="flex items-center gap-1 text-xs font-medium mb-2 cursor-pointer" style={{ color: C.inkSoft }}>
+                  <ArrowLeft size={14} /> Volver
                 </button>
-              </div>
-            </div>
+                <div className="rounded-2xl p-6" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
+                  <h1 className="text-xl font-bold mb-4" style={{ color: C.ink }}>
+                    {editingEmployeeId ? "Editar Expediente del Empleado" : "Nuevo Empleado"}
+                  </h1>
 
-            <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-xs">
-              <div className="flex border-b border-slate-200 gap-6">
-                <button
-                  onClick={() => setEmployeeStatusTab("activo")}
-                  className={`pb-2 text-xs font-bold transition-all cursor-pointer ${
-                    employeeStatusTab === "activo" ? "border-b-2 border-[#1B4B43] text-[#1B4B43]" : "text-slate-400"
-                  }`}
-                >
-                  Activos ({employees.filter(e => String(e.employment_status || "activo").toLowerCase() === "activo").length})
-                </button>
-                <button
-                  onClick={() => setEmployeeStatusTab("baja")}
-                  className={`pb-2 text-xs font-bold transition-all cursor-pointer ${
-                    employeeStatusTab === "baja" ? "border-b-2 border-[#1B4B43] text-[#1B4B43]" : "text-slate-400"
-                  }`}
-                >
-                  Bajas ({employees.filter(e => String(e.employment_status).toLowerCase() === "baja").length})
-                </button>
-                <button
-                  onClick={() => setEmployeeStatusTab("todos")}
-                  className={`pb-2 text-xs font-bold transition-all cursor-pointer ${
-                    employeeStatusTab === "todos" ? "border-b-2 border-[#1B4B43] text-[#1B4B43]" : "text-slate-400"
-                  }`}
-                >
-                  Todos ({employees.length})
-                </button>
-              </div>
-
-              <div className="relative w-72">
-                <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Buscar colaborador..."
-                  value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 rounded-xl text-xs bg-slate-50 border border-slate-200 outline-none focus:border-[#1B4B43]"
-                />
-              </div>
-            </div>
-
-            {employeesLoading ? (
-              <Spinner label="Cargando colaboradores..." />
-            ) : employeesError ? (
-              <div className="bg-rose-50 border border-rose-200 text-rose-700 p-4 rounded-2xl text-xs">
-                {employeesError}
-              </div>
-            ) : filteredEmployees.length === 0 ? (
-              <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 space-y-2">
-                <Users size={32} className="mx-auto text-slate-300" />
-                <p className="text-sm font-bold text-slate-700">No se encontraron empleados registrados.</p>
-                <p className="text-xs text-slate-400">Verifica los filtros seleccionados o realiza una actualización de la lista.</p>
-              </div>
-            ) : (
-              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs divide-y divide-slate-100">
-                {filteredEmployees
-                  .filter(e => {
-                    if (!searchInput.trim()) return true;
-                    const full = `${e.first_name || ''} ${e.last_name || ''} ${e.personal_email || ''}`.toLowerCase();
-                    return full.includes(searchInput.toLowerCase());
-                  })
-                  .map((e) => (
-                    <div 
-                      key={e.id || Math.random()} 
-                      onClick={() => setSelectedEmployeeId(e.id)}
-                      className="p-4 flex items-center justify-between hover:bg-slate-50 transition-colors cursor-pointer"
+                  <div className="flex border-b mb-6 gap-6" style={{ borderColor: C.line }}>
+                    <button
+                      type="button"
+                      onClick={() => setFormTab("personal")}
+                      className="pb-2 text-xs font-semibold cursor-pointer"
+                      style={{ borderBottom: formTab === "personal" ? `2px solid ${C.primary}` : "none", color: formTab === "personal" ? C.primary : C.inkSoft }}
                     >
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-[#E7EFEC] text-[#1B4B43] font-bold flex items-center justify-center text-xs overflow-hidden shrink-0">
-                          {getCleanPhotoUrl(e.photo_url) ? (
-                            <img src={getCleanPhotoUrl(e.photo_url)} alt="" className="w-full h-full object-cover" />
-                          ) : (
-                            initials(`${e.first_name || ''} ${e.last_name || ''}`)
-                          )}
-                        </div>
-                        <div>
-                          <p className="text-sm font-bold text-slate-900">
-                            {e.first_name || 'Sin Nombre'} {e.last_name || e.last_name_paternal || ''}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            {e.position || "Puesto no asignado"} · {e.department || "General"} {e.personal_email ? `(${e.personal_email})` : ""}
-                          </p>
+                      Datos Personales y Domicilios
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormTab("laboral")}
+                      className="pb-2 text-xs font-semibold cursor-pointer"
+                      style={{ borderBottom: formTab === "laboral" ? `2px solid ${C.primary}` : "none", color: formTab === "laboral" ? C.primary : C.inkSoft }}
+                    >
+                      Datos Laborales
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormTab("nomina")}
+                      className="pb-2 text-xs font-semibold cursor-pointer"
+                      style={{ borderBottom: formTab === "nomina" ? `2px solid ${C.primary}` : "none", color: formTab === "nomina" ? C.primary : C.inkSoft }}
+                    >
+                      Nómina y Fiscal
+                    </button>
+                    {editingEmployeeId && (
+                      <button
+                        type="button"
+                        onClick={() => setFormTab("movimientos")}
+                        className="pb-2 text-xs font-semibold cursor-pointer"
+                        style={{ borderBottom: formTab === "movimientos" ? `2px solid ${C.primary}` : "none", color: formTab === "movimientos" ? C.primary : C.inkSoft }}
+                      >
+                        Historial de Movimientos
+                      </button>
+                    )}
+                  </div>
+
+                  {formTab === "personal" && (
+                    <form onSubmit={addEmployee} className="space-y-6">
+                      <div>
+                        <h2 className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: C.primary }}>Información Personal</h2>
+                        <div className="grid grid-cols-2 gap-4">
+                          <TextField label="Nombre(s)" required value={newEmployee.first_name} onChange={e => updateField("first_name", e.target.value)} />
+                          <TextField label="Apellido Paterno" required value={newEmployee.last_name_paternal || newEmployee.last_name} onChange={e => { updateField("last_name_paternal", e.target.value); updateField("last_name", e.target.value); }} />
+                          <TextField label="Apellido Materno" value={newEmployee.last_name_maternal} onChange={e => updateField("last_name_maternal", e.target.value)} />
+                          <TextField label="CURP" value={newEmployee.curp} onChange={e => updateField("curp", e.target.value)} />
+                          <TextField label="RFC" value={newEmployee.rfc} onChange={e => updateField("rfc", e.target.value)} />
+                          <TextField label="NSS" value={newEmployee.nss} onChange={e => updateField("nss", e.target.value)} />
+                          <TextField label="Fecha de Nacimiento" type="date" value={newEmployee.birth_date} onChange={e => updateField("birth_date", e.target.value)} />
+                          <TextField label="Municipio de Nacimiento" value={newEmployee.birth_place_municipality} onChange={e => updateField("birth_place_municipality", e.target.value)} />
+                          <TextField label="Estado de Nacimiento (Ej. JAL)" value={newEmployee.birth_place_state} onChange={e => updateField("birth_place_state", e.target.value)} />
+                          <TextField label="Sexo" value={newEmployee.gender} onChange={e => updateField("gender", e.target.value)} options={["Masculino", "Femenino"]} />
+                          <TextField label="Estado Civil" value={newEmployee.marital_status} onChange={e => updateField("marital_status", e.target.value)} options={["SOL", "CAS", "VIU", "DIV", "ULI"]} />
+                          <TextField label="Escolaridad" value={newEmployee.education_level} onChange={e => updateField("education_level", e.target.value)} />
+                          <TextField label="Último Grado" value={newEmployee.last_grade} onChange={e => updateField("last_grade", e.target.value)} />
+                          <TextField label="Correo Personal" type="email" value={newEmployee.personal_email} onChange={e => updateField("personal_email", e.target.value)} />
+                          <TextField label="Teléfono Fijo" value={newEmployee.phone} onChange={e => updateField("phone", e.target.value)} />
+                          <TextField label="Celular" value={newEmployee.mobile_phone} onChange={e => updateField("mobile_phone", e.target.value)} />
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3">
-                        <Badge tone={String(e.employment_status || "activo").toLowerCase() === "activo" ? "ok" : "danger"}>
-                          {e.employment_status || "activo"}
-                        </Badge>
-                        <ChevronRight size={16} className="text-slate-400" />
+                      <div className="pt-4 border-t" style={{ borderColor: C.line }}>
+                        <h2 className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: C.primary }}>Domicilio Personal (Habitual / Real)</h2>
+                        <div className="grid grid-cols-2 gap-4">
+                          <TextField label="Calle" value={newEmployee.street} onChange={e => updateField("street", e.target.value)} />
+                          <TextField label="Número Exterior" value={newEmployee.exterior_number} onChange={e => updateField("exterior_number", e.target.value)} />
+                          <TextField label="Número Interior" value={newEmployee.interior_number} onChange={e => updateField("interior_number", e.target.value)} />
+                          <TextField label="Colonia" value={newEmployee.neighborhood} onChange={e => updateField("neighborhood", e.target.value)} />
+                          <TextField label="Código Postal" value={newEmployee.postal_code} onChange={e => updateField("postal_code", e.target.value)} />
+                          <TextField label="Municipio / Alcaldía" value={newEmployee.municipality} onChange={e => updateField("municipality", e.target.value)} />
+                          <TextField label="Estado (Ej. JAL)" value={newEmployee.state} onChange={e => updateField("state", e.target.value)} />
+                        </div>
                       </div>
+
+                      <div className="pt-4 border-t" style={{ borderColor: C.line }}>
+                        <div className="flex items-center justify-between mb-3">
+                          <h2 className="text-xs font-bold uppercase tracking-wider" style={{ color: C.accent }}>Domicilio Fiscal (Constancia de Situación Fiscal SAT)</h2>
+                          <label className="flex items-center gap-2 text-xs font-medium cursor-pointer" style={{ color: C.ink }}>
+                            <input
+                              type="checkbox"
+                              checked={!!newEmployee.same_as_personal_address}
+                              onChange={e => updateField("same_as_personal_address", e.target.checked)}
+                              className="rounded"
+                            />
+                            Copiar mismo domicilio personal
+                          </label>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <TextField label="Calle (Fiscal)" value={newEmployee.fiscal_street} onChange={e => updateField("fiscal_street", e.target.value)} />
+                          <TextField label="Número Exterior (Fiscal)" value={newEmployee.fiscal_exterior_number} onChange={e => updateField("fiscal_exterior_number", e.target.value)} />
+                          <TextField label="Número Interior (Fiscal)" value={newEmployee.fiscal_interior_number} onChange={e => updateField("fiscal_interior_number", e.target.value)} />
+                          <TextField label="Colonia (Fiscal)" value={newEmployee.fiscal_neighborhood} onChange={e => updateField("fiscal_neighborhood", e.target.value)} />
+                          <TextField label="Código Postal (Fiscal)" value={newEmployee.fiscal_postal_code} onChange={e => updateField("fiscal_postal_code", e.target.value)} />
+                          <TextField label="Municipio / Alcaldía (Fiscal)" value={newEmployee.fiscal_municipality} onChange={e => updateField("fiscal_municipality", e.target.value)} />
+                          <TextField label="Estado (Fiscal - Ej. JAL)" value={newEmployee.fiscal_state} onChange={e => updateField("fiscal_state", e.target.value)} />
+                        </div>
+                      </div>
+
+                      <div className="pt-4 border-t" style={{ borderColor: C.line }}>
+                        <h2 className="text-xs font-bold uppercase tracking-wider mb-3" style={{ color: C.primary }}>Emergencia y Beneficiario</h2>
+                        <div className="grid grid-cols-2 gap-4">
+                          <TextField label="Contacto de Emergencia" value={newEmployee.emergency_contact_name} onChange={e => updateField("emergency_contact_name", e.target.value)} />
+                          <TextField label="Relación Contacto Emerg." value={newEmployee.emergency_contact_relationship} onChange={e => updateField("emergency_contact_relationship", e.target.value)} placeholder="Ej. Padre, Esposa..." />
+                          <TextField label="Teléfono Emergencia" value={newEmployee.emergency_contact_phone} onChange={e => updateField("emergency_contact_phone", e.target.value)} />
+                          
+                          <TextField label="Beneficiario" value={newEmployee.beneficiary_name} onChange={e => updateField("beneficiary_name", e.target.value)} />
+                          <TextField label="Parentesco Beneficiario" value={newEmployee.beneficiary_relationship} onChange={e => updateField("beneficiary_relationship", e.target.value)} placeholder="Ej. Esposa, Hijo(a), Madre..." />
+                          <TextField label="Teléfono Beneficiario" value={newEmployee.beneficiary_phone} onChange={e => updateField("beneficiary_phone", e.target.value)} />
+                        </div>
+                      </div>
+
+                      {saveError && <p className="text-xs" style={{ color: C.danger }}>{saveError}</p>}
+                      <div className="flex justify-end gap-3 pt-4 border-t" style={{ borderColor: C.line }}>
+                        <button type="button" onClick={() => setShowAddEmployee(false)} className="px-4 py-2 rounded-lg text-xs font-medium cursor-pointer" style={{ border: `1px solid ${C.line}`, color: C.inkSoft }}>Cancelar</button>
+                        <button type="submit" disabled={savingEmployee} className="px-4 py-2 rounded-lg text-xs font-medium text-white flex items-center gap-2 cursor-pointer shadow-sm" style={{ background: C.primary }}>
+                          {savingEmployee && <Loader2 size={13} className="animate-spin" />} Guardar Expediente
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {formTab === "laboral" && (
+                    <form onSubmit={addEmployee} className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <TextField label="Empresa / Razón Social" value={newEmployee.company_id} onChange={e => updateField("company_id", e.target.value)} options={companies} />
+                        <TextField label="Departamento" value={newEmployee.department} onChange={e => updateField("department", e.target.value)} options={availableDepartments} />
+                        <TextField label="Puesto" value={newEmployee.position} onChange={e => updateField("position", e.target.value)} placeholder="Ej. Reclutador, Gerente de RH..." />
+                        <TextField 
+                          label="Actividades del Puesto" 
+                          value={newEmployee.job_activities || ""} 
+                          onChange={e => updateField("job_activities", e.target.value)} 
+                          placeholder="Ej. Reclutamiento de personal, entrevistas, administración de expedientes..." 
+                        />
+                        <TextField 
+                          label="Jefe Directo (Reporta a)" 
+                          value={newEmployee.manager_id} 
+                          onChange={e => updateField("manager_id", e.target.value)} 
+                          options={managerOptions} 
+                        />
+                        <TextField 
+                          label="Horario Laboral" 
+                          value={newEmployee.work_schedule} 
+                          onChange={e => updateField("work_schedule", e.target.value)} 
+                          placeholder="Ej. Lunes a Viernes de 09:00 a 18:00 hrs" 
+                        />
+                        <TextField label="Fecha de Alta" type="date" required value={newEmployee.hire_date} onChange={e => updateField("hire_date", e.target.value)} />
+                        <TextField label="Estatus" value={newEmployee.employment_status} onChange={e => updateField("employment_status", e.target.value)} options={STATUS_OPTIONS} />
+                        <TextField label="Tipo de Contrato" value={newEmployee.contract_type} onChange={e => updateField("contract_type", e.target.value)} options={CONTRACT_TYPES} />
+                        <TextField label="Fecha Inicio de Contrato" type="date" value={newEmployee.contract_start_date} onChange={e => updateField("contract_start_date", e.target.value)} />
+                        <TextField label="Fecha Término de Contrato" type="date" value={newEmployee.contract_end_date} onChange={e => updateField("contract_end_date", e.target.value)} />
+                      </div>
+                      {saveError && <p className="text-xs" style={{ color: C.danger }}>{saveError}</p>}
+                      <div className="flex justify-end gap-3 pt-4 border-t" style={{ borderColor: C.line }}>
+                        <button type="button" onClick={() => setShowAddEmployee(false)} className="px-4 py-2 rounded-lg text-xs font-medium cursor-pointer" style={{ border: `1px solid ${C.line}`, color: C.inkSoft }}>Cancelar</button>
+                        <button type="submit" disabled={savingEmployee} className="px-4 py-2 rounded-lg text-xs font-medium text-white flex items-center gap-2 cursor-pointer shadow-sm" style={{ background: C.primary }}>
+                          {savingEmployee && <Loader2 size={13} className="animate-spin" />} Guardar Expediente
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {formTab === "nomina" && (
+                    <form onSubmit={addEmployee} className="space-y-4">
+                      <div className="grid grid-cols-2 gap-4">
+                        <TextField label="S.D Alta (Salario Diario)" type="number" value={newEmployee.base_daily_salary} onChange={e => updateField("base_daily_salary", e.target.value)} />
+                        <TextField label="S.D.I. Alta (Salario Diario Integrado)" type="number" value={newEmployee.sdi_salary} onChange={e => updateField("sdi_salary", e.target.value)} />
+                        <TextField label="Salario Mensual MXN" type="number" value={newEmployee.base_salary} onChange={e => updateField("base_salary", e.target.value)} />
+                        <TextField label="Tipo de Nómina" value={newEmployee.payroll_type} onChange={e => updateField("payroll_type", e.target.value)} options={[{ id: "QUI", name: "Quincenal (QUI)" }, { id: "SEM", name: "Semanal (SEM)" }]} />
+                        <TextField label="Crédito Infonavit" value={newEmployee.has_infonavit_credit} onChange={e => updateField("has_infonavit_credit", e.target.value)} options={["SI", "NO"]} />
+                        <TextField label="Número Crédito Infonavit" value={newEmployee.infonavit_credit_number} onChange={e => updateField("infonavit_credit_number", e.target.value)} />
+                        <TextField label="Valor Descuento Infonavit" type="number" value={newEmployee.infonavit_discount_value} onChange={e => updateField("infonavit_discount_value", e.target.value)} />
+                        <TextField label="Banco" value={newEmployee.bank_name} onChange={e => updateField("bank_name", e.target.value)} />
+                        <TextField label="Número de Cuenta" value={newEmployee.bank_account} onChange={e => updateField("bank_account", e.target.value)} />
+                        <TextField label="CLABE Interbancaria" value={newEmployee.bank_clabe} onChange={e => updateField("bank_clabe", e.target.value)} />
+                      </div>
+                      {saveError && <p className="text-xs" style={{ color: C.danger }}>{saveError}</p>}
+                      <div className="flex justify-end gap-3 pt-4 border-t" style={{ borderColor: C.line }}>
+                        <button type="button" onClick={() => setShowAddEmployee(false)} className="px-4 py-2 rounded-lg text-xs font-medium cursor-pointer" style={{ border: `1px solid ${C.line}`, color: C.inkSoft }}>Cancelar</button>
+                        <button type="submit" disabled={savingEmployee} className="px-4 py-2 rounded-lg text-xs font-medium text-white flex items-center gap-2 cursor-pointer shadow-sm" style={{ background: C.primary }}>
+                          {savingEmployee && <Loader2 size={13} className="animate-spin" />} Guardar Expediente
+                        </button>
+                      </div>
+                    </form>
+                  )}
+
+                  {formTab === "movimientos" && (
+                    <div className="space-y-3">
+                      <h2 className="text-xs font-bold uppercase tracking-wider" style={{ color: C.inkSoft }}>Historial Registrado</h2>
+                      {employeeHistory.length === 0 ? (
+                        <p className="text-xs text-slate-400">No hay movimientos o cambios de estatus registrados.</p>
+                      ) : (
+                        <div className="space-y-2 max-h-60 overflow-y-auto">
+                          {employeeHistory.map((h, idx) => (
+                            <div key={idx} className="p-3 rounded-lg border text-xs bg-slate-50" style={{ borderColor: C.line }}>
+                              <p className="font-semibold">{h.action || "Movimiento"}</p>
+                              <p className="text-[10px] text-slate-400">{h.created_at?.slice(0, 10)}</p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                  ))}
+                  )}
+                </div>
+              </div>
+            ) : selectedEmployee ? (
+              <EmployeeDetail
+                employee={selectedEmployee}
+                onBack={() => setSelectedEmployeeId(null)}
+                onEdit={() => openNewEmployeeForm(selectedEmployee)}
+                templates={templates}
+                documents={employeeDocuments}
+                selectedTemplateId={selectedTemplateId}
+                onSelectTemplate={setSelectedTemplateId}
+                onGenerate={generateDocument}
+                generating={generatingDoc}
+                isMultiForm={
+                  templates.find((t) => t.id === selectedTemplateId)?.name ===
+                    "Formato Múltiple de Solicitudes" ||
+                  selectedTemplateId === "formato_multiple"
+                }
+                multiFormOptions={multiFormOptions}
+                checkedOptions={checkedOptions}
+                onToggleOption={toggleOption}
+                observaciones={observaciones}
+                onObservacionesChange={setObservaciones}
+                fechaSolicitud={fechaSolicitud}
+                onFechaSolicitudChange={setFechaSolicitud}
+                childName={childName}
+                onChildNameChange={setChildName}
+                incidentDate={incidentDate}
+                onIncidentDateChange={setIncidentDate}
+                incidentTime={incidentTime}
+                onIncidentTimeChange={setIncidentTime}
+                incidentLocation={incidentLocation}
+                onIncidentLocationChange={setIncidentLocation}
+                witness1={witness1}
+                onWitness1Change={setWitness1}
+                witness2={witness2}
+                onWitness2Change={setWitness2}
+                photoUploading={photoUploading}
+                onPhotoChange={handlePhotoChange}
+                employeeFiles={employeeFiles}
+                onUploadFile={handleUploadFile}
+                onDeleteFile={handleDeleteFile}
+                fileUploading={fileUploading}
+                token={token}
+                api={api}
+                loadEmployeeDocuments={loadEmployeeDocuments}
+                loadEmployeeFiles={loadEmployeeFiles}
+                onSelectBatchPdf={(file) => {
+                  setPendingPdfFile(file);
+                  setIsPdfModalOpen(true);
+                }}
+              />
+            ) : (
+              <div>
+                <div className="flex items-center justify-between mb-6">
+                  <div>
+                    <h1 className="text-2xl font-semibold mb-1" style={{ color: C.ink }}>Directorio de Colaboradores</h1>
+                    <p className="text-sm" style={{ color: C.inkSoft }}>Gestión y expediente digital de tu personal.</p>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button onClick={() => openNewEmployeeForm()} className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium cursor-pointer text-white" style={{ background: C.primary }}>
+                      <Plus size={16} /> Nuevo empleado
+                    </button>
+                    <label className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold border bg-white cursor-pointer hover:bg-slate-50 transition-colors shadow-sm" style={{ borderColor: C.line, color: C.ink }}>
+                      <FileSpreadsheet size={16} className="text-emerald-700" />
+                      <span>Importar Excel</span>
+                      <input
+                        type="file"
+                        accept=".xlsx, .xls"
+                        className="hidden"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          try {
+                            setEmployeesLoading(true);
+                            const res = await api.uploadEmployeesExcel(token, file);
+                            alert(res.message);
+                            await loadEmployees();
+                          } catch (err) {
+                            alert("❌ Error en la importación: " + err.message);
+                          } finally {
+                            setEmployeesLoading(false);
+                            e.target.value = "";
+                          }
+                        }}
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                <div className="flex border-b mb-5 gap-6" style={{ borderColor: C.line }}>
+                  <button
+                    onClick={() => setEmployeeStatusTab("activo")}
+                    className="pb-2 text-xs font-semibold cursor-pointer"
+                    style={{ borderBottom: employeeStatusTab === "activo" ? `2px solid ${C.primary}` : "none", color: employeeStatusTab === "activo" ? C.primary : C.inkSoft }}
+                  >
+                    Activos ({employees.filter(e => isSameCompany(e, selectedCompanyFilter?.id) && (e.employment_status || "activo") === "activo").length})
+                  </button>
+                  <button
+                    onClick={() => setEmployeeStatusTab("baja")}
+                    className="pb-2 text-xs font-semibold cursor-pointer"
+                    style={{ borderBottom: employeeStatusTab === "baja" ? `2px solid ${C.primary}` : "none", color: employeeStatusTab === "baja" ? C.primary : C.inkSoft }}
+                  >
+                    Bajas ({employees.filter(e => isSameCompany(e, selectedCompanyFilter?.id) && e.employment_status === "baja").length})
+                  </button>
+                  <button
+                    onClick={() => setEmployeeStatusTab("todos")}
+                    className="pb-2 text-xs font-semibold cursor-pointer"
+                    style={{ borderBottom: employeeStatusTab === "todos" ? `2px solid ${C.primary}` : "none", color: employeeStatusTab === "todos" ? C.primary : C.inkSoft }}
+                  >
+                    Todos ({employees.filter(e => isSameCompany(e, selectedCompanyFilter?.id)).length})
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-3 mb-5">
+                  <div className="relative flex-1">
+                    <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: C.inkSoft }} />
+                    <input
+                      placeholder="Buscar por nombre o correo…"
+                      value={searchInput}
+                      onChange={e => setSearchInput(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && loadEmployees(searchInput)}
+                      className="w-full pl-9 pr-3 py-2.5 rounded-lg text-sm outline-none bg-white border"
+                      style={{ borderColor: C.line }}
+                    />
+                  </div>
+                  <button onClick={() => loadEmployees(searchInput)} className="px-4 py-2.5 rounded-lg text-sm font-medium cursor-pointer" style={{ background: C.primarySoft, color: C.primary }}>Buscar</button>
+                  <button onClick={() => { setSearchInput(""); loadEmployees(); }} className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-lg text-sm bg-white border cursor-pointer" style={{ borderColor: C.line, color: C.inkSoft }}><RefreshCw size={15} /> Actualizar</button>
+
+                  {employeeStatusTab === "activo" && (
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => setShowAddExportAltasModal(true)}
+                        className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold text-white whitespace-nowrap cursor-pointer"
+                        style={{ background: C.primary }}
+                      >
+                        <FileSpreadsheet size={16} /> Exportar Formato Altas (Excel)
+                      </button>
+
+                      <button
+                        onClick={() => setShowBatchModal(true)}
+                        className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold text-white whitespace-nowrap cursor-pointer transition-all hover:opacity-90"
+                        style={{ background: C.ok }}
+                      >
+                        <FolderDown size={16} /> Generación Masiva de Formatos (ZIP)
+                      </button>
+                    </div>
+                  )}
+
+                  {employeeStatusTab === "baja" && (
+                    <button
+                      onClick={exportBajasToExcel}
+                      className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold text-white whitespace-nowrap cursor-pointer"
+                      style={{ background: C.ok }}
+                    >
+                      <FileSpreadsheet size={16} /> Exportar Bajas (Excel)
+                    </button>
+                  )}
+                </div>
+
+                {employeesLoading && <Spinner label="Cargando empleados…" />}
+                {employeesError && <p className="text-sm py-4" style={{ color: C.danger }}>{employeesError}</p>}
+
+                {!employeesLoading && !employeesError && (() => {
+                  const companyEmployees = filteredEmployees.filter(e => isSameCompany(e, selectedCompanyFilter?.id));
+
+                  if (companyEmployees.length === 0) {
+                    return (
+                      <div className="rounded-2xl p-8 text-center bg-white border" style={{ borderColor: C.line }}>
+                        <p className="text-sm" style={{ color: C.inkSoft }}>
+                          No hay colaboradores registrados para el filtro seleccionado.
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  const groupedByDepartment = companyEmployees.reduce((acc, emp) => {
+                    const dept = emp.department?.trim() || "Sin Departamento Asignado";
+                    if (!acc[dept]) acc[dept] = [];
+                    acc[dept].push(emp);
+                    return acc;
+                  }, {});
+
+                  return (
+                    <div className="space-y-6">
+                      {Object.entries(groupedByDepartment).map(([deptName, deptEmployees]) => (
+                        <div 
+                          key={deptName} 
+                          className="rounded-2xl overflow-hidden bg-white border shadow-2xs space-y-0" 
+                          style={{ borderColor: C.line }}
+                        >
+                          <div 
+                            className="px-5 py-3 border-b flex items-center justify-between"
+                            style={{ backgroundColor: C.primarySoft, borderColor: C.line }}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full" style={{ background: C.primary }}></span>
+                              <h2 className="text-xs font-bold uppercase tracking-wider" style={{ color: C.primary }}>
+                                {deptName}
+                              </h2>
+                            </div>
+                            <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-white text-slate-700 border border-slate-200">
+                              {deptEmployees.length} {deptEmployees.length === 1 ? "colaborador" : "colaboradores"}
+                            </span>
+                          </div>
+
+                          <div className="divide-y" style={{ borderColor: C.line }}>
+                            {deptEmployees.map((e) => (
+                              <div
+                                key={e.id}
+                                onClick={() => setSelectedEmployeeId(e.id)}
+                                className="w-full flex items-center justify-between px-5 py-3.5 text-left cursor-pointer hover:bg-slate-50/80 transition-colors"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div 
+                                    className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold overflow-hidden shrink-0" 
+                                    style={{ background: C.primarySoft, color: C.primary }}
+                                  >
+                                    {getCleanPhotoUrl(e.photo_url) ? (
+                                      <img src={getCleanPhotoUrl(e.photo_url)} alt="" className="w-full h-full object-cover" />
+                                    ) : (
+                                      initials(`${e.first_name || ''} ${e.last_name || ''}`)
+                                    )}
+                                  </div>
+                                  <div>
+                                    <p className="text-sm font-semibold" style={{ color: C.ink }}>
+                                      {e.first_name} {e.last_name || e.last_name_paternal || ''}
+                                    </p>
+                                    <p className="text-xs" style={{ color: C.inkSoft }}>
+                                      {e.position || "Puesto no asignado"} {e.personal_email ? `· ${e.personal_email}` : ""}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-3">
+                                  <Badge tone={e.employment_status === "activo" ? "ok" : e.employment_status === "baja" ? "danger" : "pending"}>
+                                    {e.employment_status || "activo"}
+                                  </Badge>
+
+                                  {isAdmin && (
+                                    <button
+                                      type="button"
+                                      onClick={(evt) => handleDeleteEmployee(evt, e.id, `${e.first_name} ${e.last_name || ''}`)}
+                                      className="p-1.5 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
+                                      style={{ color: C.danger }}
+                                      title="Eliminar Colaborador"
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  )}
+
+                                  <ChevronRight size={16} style={{ color: C.inkSoft }} />
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>
