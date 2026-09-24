@@ -38,7 +38,7 @@ function getCleanPhotoUrl(url) {
 
 // 🟢 HELPER COMPARADOR SEGURO DE UUIDS DE EMPRESAS Y COLABORADORES
 function isSameCompany(employeeOrId, filterCompanyId) {
-  if (!filterCompanyId) return true; // Corregido: Si no hay filtro, mostrar por defecto
+  if (!filterCompanyId || filterCompanyId === "all") return true;
 
   let empCompId = null;
   if (typeof employeeOrId === "object" && employeeOrId !== null) {
@@ -306,12 +306,19 @@ function AppInner() {
     setEmployeesError("");
     try {
       const data = await api.getEmployees(token, search);
-      const list = Array.isArray(data) ? data : (data?.employees || data?.data || []);
-      window.listaEmpleados = list;
-      setEmployees(list);
+      
+      let employeeList = [];
+      if (Array.isArray(data)) {
+        employeeList = data;
+      } else if (data && typeof data === 'object') {
+        employeeList = data.employees || data.data || data.rows || [];
+      }
+
+      window.listaEmpleados = employeeList;
+      setEmployees(employeeList);
     } catch (err) {
       console.error("Error al cargar empleados:", err);
-      setEmployeesError(err.message || "Error al cargar colaboradores.");
+      setEmployeesError("Error del servidor en Railway (500): " + (err.message || "Error al conectar"));
     } finally {
       setEmployeesLoading(false);
     }
@@ -1419,6 +1426,8 @@ function AppInner() {
   ];
 
   const pendingCount = leaveRequests.filter(r => r.status === "pendiente").length;
+  const userEmployeeProfile = employees.find(e => e.personal_email === user?.email);
+  const userDept = userEmployeeProfile?.department || user?.department || "Recursos Humanos";
 
   return (
     <div className="min-h-screen w-full flex" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
@@ -1945,7 +1954,7 @@ function AppInner() {
           </div>
         )}
 
-        {/* 🟢 SECCIÓN EMPLEADOS RENDERIZADA CON PROTECCIÓN TOTAL DE PANTALLA BLANCA */}
+        {/* 🟢 SECCIÓN EMPLEADOS RENDERIZADA DIRECTA SIN BLOQUEOS DE ROL NI EMPRESA */}
         {view === "employees" && (
           <div>
             {showAddEmployee ? (
@@ -2321,8 +2330,13 @@ function AppInner() {
                   )}
                 </div>
 
-                {employeesLoading && <Spinner label="Cargando empleados…" />}
-                {employeesError && <p className="text-sm py-4" style={{ color: C.danger }}>{employeesError}</p>}
+                {employeesLoading && <Spinner label="Cargando empleados desde servidor…" />}
+                {employeesError && (
+                  <div className="bg-rose-50 border border-rose-200 text-rose-700 p-4 rounded-2xl text-xs space-y-1 my-4">
+                    <p className="font-bold">Aviso de conexión:</p>
+                    <p>{employeesError}</p>
+                  </div>
+                )}
 
                 {!employeesLoading && !employeesError && (() => {
                   const companyEmployees = filteredEmployees.filter(e => isSameCompany(e, selectedCompanyFilter?.id));
@@ -2368,9 +2382,9 @@ function AppInner() {
                           </div>
 
                           <div className="divide-y" style={{ borderColor: C.line }}>
-                            {deptEmployees.map((e) => (
+                            {deptEmployees.map((e, idx) => (
                               <div
-                                key={e.id}
+                                key={e.id || `emp-${idx}`}
                                 onClick={() => setSelectedEmployeeId(e.id)}
                                 className="w-full flex items-center justify-between px-5 py-3.5 text-left cursor-pointer hover:bg-slate-50/80 transition-colors"
                               >
