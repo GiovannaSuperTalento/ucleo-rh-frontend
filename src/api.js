@@ -1,8 +1,10 @@
 // src/api.js
 
-// 🟢 Garantizar que la URL base siempre termine con /api y sea absoluta hacia Railway
+// src/api.js
 const rawUrl = import.meta.env.VITE_API_URL || "https://ucleo-rh-backend-production.up.railway.app";
 const cleanUrl = rawUrl.replace(/\/$/, "");
+
+// 🟢 Si la URL ya termina en /api la deja tal cual, si no, se lo agrega
 export const API_BASE = cleanUrl.endsWith("/api") ? cleanUrl : `${cleanUrl}/api`;
 
 // 🟢 Interceptor seguro: No expulsa al usuario ante errores de expedientes

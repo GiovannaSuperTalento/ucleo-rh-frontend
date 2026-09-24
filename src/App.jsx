@@ -2924,7 +2924,7 @@ function AppInner() {
               setPendingPdfFile(null);
             } catch (err) {
               alert("❌ Error: " + err.message);
-            } flexally {
+            } finally {
               setIsPdfSplitting(false);
             }
           }}
