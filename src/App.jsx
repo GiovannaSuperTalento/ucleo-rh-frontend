@@ -1426,8 +1426,6 @@ function AppInner() {
   ];
 
   const pendingCount = leaveRequests.filter(r => r.status === "pendiente").length;
-  const userEmployeeProfile = employees.find(e => e.personal_email === user?.email);
-  const userDept = userEmployeeProfile?.department || user?.department || "Recursos Humanos";
 
   return (
     <div className="min-h-screen w-full flex" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
@@ -2246,7 +2244,7 @@ function AppInner() {
                           try {
                             setEmployeesLoading(true);
                             const res = await api.uploadEmployeesExcel(token, file);
-                            alert(res.message);
+                            alert(res.message || "Importación completada");
                             await loadEmployees();
                           } catch (err) {
                             alert("❌ Error en la importación: " + err.message);
@@ -2352,7 +2350,7 @@ function AppInner() {
                   }
 
                   const groupedByDepartment = companyEmployees.reduce((acc, emp) => {
-                    const dept = emp.department?.trim() || "Sin Departamento Asignado";
+                    const dept = (emp && emp.department) ? String(emp.department).trim() : "Sin Departamento Asignado";
                     if (!acc[dept]) acc[dept] = [];
                     acc[dept].push(emp);
                     return acc;
