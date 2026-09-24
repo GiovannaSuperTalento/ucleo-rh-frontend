@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import StickyNotes from "./dashboard/StickyNotes";
 import { API_BASE } from "../api";
+
 // Paleta de colores vivos y variados para los Post-its
 const POSTIT_COLORS = [
   { id: "yellow", bg: "#FEF08A", text: "#854D0E", border: "#FACC15", name: "Amarillo" },
@@ -59,22 +60,27 @@ export default function WorkspaceDashboard({ token, user, api, onNavigate }) {
   useEffect(() => {
     async function loadDashboardData() {
       try {
-        if (api.getEmployees) {
+        if (api && api.getEmployees) {
           const emps = await api.getEmployees(token, "");
           setEmployees(Array.isArray(emps) ? emps : []);
         }
 
-        if (api.getMyLeaveBalance) {
+        if (api && api.getMyLeaveBalance) {
           const balance = await api.getMyLeaveBalance(token);
           setLeaveBalance(Array.isArray(balance) ? balance[0] : balance);
         }
 
-        const resAnnouncements = await fetch(`${API_BASE}/announcements`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (resAnnouncements.ok) {
-          const data = await resAnnouncements.json();
+        if (api && api.getAnnouncements) {
+          const data = await api.getAnnouncements(token);
           setAnnouncements(Array.isArray(data) ? data : []);
+        } else {
+          const resAnnouncements = await fetch(`${API_BASE}/announcements`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          if (resAnnouncements.ok) {
+            const data = await resAnnouncements.json();
+            setAnnouncements(Array.isArray(data) ? data : []);
+          }
         }
       } catch (err) {
         console.error("Error al cargar datos del Dashboard:", err);
