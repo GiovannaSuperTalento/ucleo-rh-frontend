@@ -5,7 +5,7 @@ import {
   ChevronLeft, ChevronRight, Video, FileText
 } from "lucide-react";
 import StickyNotes from "./dashboard/StickyNotes";
-
+import { API_BASE } from "../api";
 // Paleta de colores vivos y variados para los Post-its
 const POSTIT_COLORS = [
   { id: "yellow", bg: "#FEF08A", text: "#854D0E", border: "#FACC15", name: "Amarillo" },
