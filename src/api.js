@@ -1,5 +1,9 @@
 // src/api.js
-export const API_BASE = import.meta.env.VITE_API_URL || "https://ucleo-rh-backend-production.up.railway.app";
+
+// 🟢 Garantizar que la URL base siempre termine con /api y sea absoluta hacia Railway
+const rawUrl = import.meta.env.VITE_API_URL || "https://ucleo-rh-backend-production.up.railway.app";
+const cleanUrl = rawUrl.replace(/\/$/, "");
+export const API_BASE = cleanUrl.endsWith("/api") ? cleanUrl : `${cleanUrl}/api`;
 
 // 🟢 Interceptor seguro: No expulsa al usuario ante errores de expedientes
 const handleResponse = async (res, defaultErrorMsg) => {
@@ -30,12 +34,33 @@ export const formatPhotoUrl = (url) => {
 
 export const api = {
 
+  // 🟢 MÓDULO: COMUNICADOS / ANUNCIOS
+  getAnnouncements: (token) =>
+    fetch(`${API_BASE}/announcements`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "Error al cargar comunicados")).catch(() => []),
+
+  createAnnouncement: (token, payload) =>
+    fetch(`${API_BASE}/announcements`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    }).then((res) => handleResponse(res, "Error al publicar comunicado")),
+
+  deleteAnnouncement: (token, id) =>
+    fetch(`${API_BASE}/announcements/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "Error al eliminar comunicado")),
+
   // 🟢 ACTUALIZADO: Permite recibir un mapeo dinámico de páginas
   uploadBatchEmployeeFiles: (token, employeeId, file, mapping = null) => {
     const formData = new FormData();
     formData.append("file", file);
 
-    // Si se pasa un objeto con la distribución de páginas, se envía serializado
     if (mapping) {
       formData.append("mapping", typeof mapping === "string" ? mapping : JSON.stringify(mapping));
     }
@@ -364,33 +389,27 @@ export const api = {
       body: JSON.stringify({ message }),
     }).then((res) => handleResponse(res, "Error al conectar con la IA")),
 
-  // 🟢 MÓDULO: CENTRO DE PUBLICACIONES SOCIALES (RECLUTAMIENTO)
-  
-  // 1. Verificación de permiso conceptual PUBLICACIONES_SOCIALES
+  // MÓDULO: CENTRO DE PUBLICACIONES SOCIALES (RECLUTAMIENTO)
   checkSocialPermission: (token) =>
     fetch(`${API_BASE}/social-publications/check-permission`, {
       headers: { Authorization: `Bearer ${token}` },
     }).then((res) => handleResponse(res, "No cuentas con autorización para acceder al Centro de Publicaciones.")),
 
-  // 2. Obtener estadísticas del Dashboard del Centro de Publicaciones
   getSocialStats: (token) =>
     fetch(`${API_BASE}/social-publications/stats`, {
       headers: { Authorization: `Bearer ${token}` },
     }).then((res) => handleResponse(res, "Error al cargar métricas de publicaciones.")),
 
-  // 3. Obtener vacantes registradas en Núcleo RH para autopoblar publicaciones
   getSocialVacancies: (token) =>
     fetch(`${API_BASE}/social-publications/vacancies`, {
       headers: { Authorization: `Bearer ${token}` },
     }).then((res) => handleResponse(res, "Error al obtener catálogo de vacantes.")),
 
-  // 4. Listar publicaciones creadas y programadas
   getSocialPosts: (token, filter = "") =>
     fetch(`${API_BASE}/social-publications/posts?filter=${encodeURIComponent(filter)}`, {
       headers: { Authorization: `Bearer ${token}` },
     }).then((res) => handleResponse(res, "Error al obtener historial de publicaciones.")),
 
-  // 5. Crear una nueva publicación a partir de una vacante o plantilla
   createSocialPost: (token, payload) =>
     fetch(`${API_BASE}/social-publications/posts`, {
       method: "POST",
@@ -401,7 +420,6 @@ export const api = {
       body: JSON.stringify(payload),
     }).then((res) => handleResponse(res, "Error al guardar la publicación.")),
 
-  // 6. Actualizar / Programar / Cancelar publicación existente
   updateSocialPost: (token, id, payload) =>
     fetch(`${API_BASE}/social-publications/posts/${id}`, {
       method: "PUT",
@@ -412,20 +430,17 @@ export const api = {
       body: JSON.stringify(payload),
     }).then((res) => handleResponse(res, "Error al actualizar la publicación.")),
 
-  // 7. Eliminar publicación
   deleteSocialPost: (token, id) =>
     fetch(`${API_BASE}/social-publications/posts/${id}`, {
       method: "DELETE",
       headers: { Authorization: `Bearer ${token}` },
     }).then((res) => handleResponse(res, "Error al eliminar la publicación.")),
 
-  // 8. Obtener plantillas de publicaciones (Vacante General, Urgente, Operativa, etc.)
   getSocialTemplates: (token) =>
     fetch(`${API_BASE}/social-publications/templates`, {
       headers: { Authorization: `Bearer ${token}` },
     }).then((res) => handleResponse(res, "Error al cargar plantillas de publicaciones.")),
 
-  // 9. Administrar catálogo de Grupos de Facebook / Redes
   getSocialGroups: (token) =>
     fetch(`${API_BASE}/social-publications/groups`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -447,7 +462,6 @@ export const api = {
       headers: { Authorization: `Bearer ${token}` },
     }).then((res) => handleResponse(res, "Error al eliminar grupo.")),
 
-  // 🟢 FASE 5: Métodos de Auditoría y Programación
   getSocialLogs: (token) =>
     fetch(`${API_BASE}/social-publications/logs`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -463,7 +477,6 @@ export const api = {
       body: JSON.stringify({ scheduled_at }),
     }).then((res) => handleResponse(res, "Error al programar la publicación.")),
 
-  // 🟢 FASE 6: Métodos de Distribución Multigrupo
   getPostGroups: (token, postId) =>
     fetch(`${API_BASE}/social-publications/posts/${postId}/groups`, {
       headers: { Authorization: `Bearer ${token}` },
