@@ -69,7 +69,7 @@ export default function WorkspaceDashboard({ token, user, api, onNavigate }) {
           setLeaveBalance(Array.isArray(balance) ? balance[0] : balance);
         }
 
-        const resAnnouncements = await fetch("${API_BASE}/api/announcements", {
+        const resAnnouncements = await fetch(`${API_BASE}/announcements`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (resAnnouncements.ok) {
