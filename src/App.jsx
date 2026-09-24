@@ -288,7 +288,7 @@ function AppInner() {
     if (!Array.isArray(employees)) return [];
     return employees
       .filter(e => e.employment_status === "activo" && e.id !== editingEmployeeId)
-      .map(e => ({ id: e.id, full_name: `${e.position || 'Sin Puesto'} — ${e.first_name} ${e.last_name}` }));
+      .map(e => ({ id: e.id, full_name: `${e.position || 'Sin Puesto'} — ${e.first_name} ${e.last_name || ''}` }));
   }, [employees, editingEmployeeId]);
 
   const availableDepartments = useMemo(() => {
@@ -301,15 +301,18 @@ function AppInner() {
     return Array.from(new Set([...companyDeptNames, ...DEPARTMENTS]));
   }, [companies, newEmployee.company_id]);
 
+  // 🟢 MEJORADO: Desestructuración tolerante para evitar listas en blanco
   async function loadEmployees(search = "") {
     setEmployeesLoading(true);
     setEmployeesError("");
     try {
       const data = await api.getEmployees(token, search);
-      window.listaEmpleados = data;
-      setEmployees(Array.isArray(data) ? data : []);
+      const employeeList = Array.isArray(data) ? data : (data?.employees || data?.data || []);
+      window.listaEmpleados = employeeList;
+      setEmployees(employeeList);
     } catch (err) {
-      setEmployeesError(err.message);
+      console.error("Error al cargar empleados:", err);
+      setEmployeesError(err.message || "Error al cargar colaboradores.");
     } finally {
       setEmployeesLoading(false);
     }
@@ -2446,8 +2449,12 @@ function AppInner() {
                 {employeesLoading && <Spinner label="Cargando empleados…" />}
                 {employeesError && <p className="text-sm py-4" style={{ color: C.danger }}>{employeesError}</p>}
 
+                {/* 🟢 MEJORADO: Renderizado robusto contra arreglos y datos nulos */}
                 {!employeesLoading && !employeesError && (() => {
-                  const companyEmployees = filteredEmployees.filter(e => isSameCompany(e, selectedCompanyFilter.id));
+                  const companyEmployees = filteredEmployees.filter(e => {
+                    if (!selectedCompanyFilter) return true;
+                    return isSameCompany(e, selectedCompanyFilter.id);
+                  });
 
                   if (companyEmployees.length === 0) {
                     return (
@@ -2504,12 +2511,12 @@ function AppInner() {
                                     {getCleanPhotoUrl(e.photo_url) ? (
                                       <img src={getCleanPhotoUrl(e.photo_url)} alt="" className="w-full h-full object-cover" />
                                     ) : (
-                                      initials(`${e.first_name} ${e.last_name}`)
+                                      initials(`${e.first_name || ''} ${e.last_name || ''}`)
                                     )}
                                   </div>
                                   <div>
                                     <p className="text-sm font-semibold" style={{ color: C.ink }}>
-                                      {e.first_name} {e.last_name}
+                                      {e.first_name} {e.last_name || e.last_name_paternal || ''}
                                     </p>
                                     <p className="text-xs" style={{ color: C.inkSoft }}>
                                       {e.position || "Puesto no asignado"} {e.personal_email ? `· ${e.personal_email}` : ""}
@@ -2519,7 +2526,7 @@ function AppInner() {
 
                                 <div className="flex items-center gap-3">
                                   <Badge tone={e.employment_status === "activo" ? "ok" : e.employment_status === "baja" ? "danger" : "pending"}>
-                                    {e.employment_status}
+                                    {e.employment_status || "activo"}
                                   </Badge>
 
                                   {isAdmin && (
