@@ -5,14 +5,14 @@ import {
   User, Briefcase, DollarSign, Siren, History, Loader2, KeyRound, Copy, Trash2, Camera, MessageSquare, Download, FolderDown, FileSpreadsheet, Send, Info, Calendar, Key, Shield, CheckCircle
 } from "lucide-react";
 import Workbook from "exceljs";
-import { api } from "./api";
+import { api, API_BASE } from "./api";
 import WorkspaceDashboard from "./components/WorkspaceDashboard";
 import ChatModule from "./ChatModule";
 import StickyNotes from "./components/dashboard/StickyNotes";
 import { PdfSplitModal } from "./components/PdfSplitModal";
 import { SocialPublicationsModule } from "./components/SocialPublicationsModule";
-import { Share2 } from "lucide-react"; // Agregar icono Share2
-import { API_BASE } from "./api";
+import { Share2 } from "lucide-react";
+
 const C = {
   bg: "#F3F5F4", surface: "#FFFFFF", ink: "#1B2A2E", inkSoft: "#5B6B6E", line: "#E1E6E4",
   primary: "#1B4B43", primarySoft: "#E7EFEC", accent: "#C6793D", accentSoft: "#FBEBDC",
@@ -28,10 +28,12 @@ function getCleanPhotoUrl(url) {
   if (clean.startsWith("data:image")) return clean;
   if (clean.includes("/uploads/")) {
     const filename = clean.split("/uploads/").pop();
-    return `${API_BASE}/uploads/${filename}`;
+    const baseUrl = API_BASE.replace(/\/api$/, "");
+    return `${baseUrl}/uploads/${filename}`;
   }
   if (clean.startsWith("http://") || clean.startsWith("https://")) return clean;
-  return `${API_BASE}${clean.startsWith("/") ? clean : `/${clean}`}`;
+  const baseUrl = API_BASE.replace(/\/api$/, "");
+  return `${baseUrl}${clean.startsWith("/") ? clean : `/${clean}`}`;
 }
 
 // 🟢 HELPER COMPARADOR SEGURO DE UUIDS DE EMPRESAS Y COLABORADORES
@@ -332,7 +334,7 @@ function AppInner() {
   async function loadCompanies() {
     setCompaniesLoading(true);
     try {
-      const res = await fetch("${API_BASE}/api/companies", {
+      const res = await fetch(`${API_BASE}/companies`, {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (res.ok) {
@@ -340,7 +342,7 @@ function AppInner() {
         const companiesWithTemplates = await Promise.all(data.map(async (c) => {
           const cleanCompany = { ...c, id: String(c.id).trim() };
           try {
-            const tmplRes = await fetch(`${API_BASE}/api/companies/${cleanCompany.id}/templates`, {
+            const tmplRes = await fetch(`${API_BASE}/companies/${cleanCompany.id}/templates`, {
               headers: { Authorization: `Bearer ${token}` }
             });
             if (tmplRes.ok) {
@@ -363,7 +365,7 @@ function AppInner() {
   async function handleDeleteCompanyTemplate(templateId) {
     if (!window.confirm("¿Estás seguro de eliminar esta plantilla? Esta acción no se puede deshacer.")) return;
     try {
-      const res = await fetch(`${API_BASE}/api/companies/templates/${templateId}`, {
+      const res = await fetch(`${API_BASE}/companies/templates/${templateId}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` }
       });
@@ -396,15 +398,15 @@ function AppInner() {
     setLeaveLoading(true);
     try {
       const [requests, types] = await Promise.all([
-        api.getLeaveRequests ? api.getLeaveRequests(token) : fetch("${API_BASE}/api/leaves/requests", { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
-        api.getLeaveTypes ? api.getLeaveTypes(token) : fetch("${API_BASE}/api/leave-types", { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json())
+        api.getLeaveRequests ? api.getLeaveRequests(token) : fetch(`${API_BASE}/leaves/requests`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json()),
+        api.getLeaveTypes ? api.getLeaveTypes(token) : fetch(`${API_BASE}/leaves/types`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json())
       ]);
       setLeaveRequests(Array.isArray(requests) ? requests : []);
       setLeaveTypes(Array.isArray(types) ? types : []);
       
       const balance = api.getMyLeaveBalance 
         ? await api.getMyLeaveBalance(token)
-        : await fetch("${API_BASE}/api/leaves/my-balance", { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
+        : await fetch(`${API_BASE}/leaves/my-balance`, { headers: { Authorization: `Bearer ${token}` } }).then(r => r.json());
       setMyBalance(Array.isArray(balance) ? balance[0] : balance || null);
     } catch (err) {
       console.error("Error al cargar datos de vacaciones:", err);
@@ -424,7 +426,7 @@ function AppInner() {
       if (api.requestLeave) {
         await api.requestLeave(token, leaveForm);
       } else {
-        const response = await fetch("${API_BASE}/api/leaves/request", {
+        const response = await fetch(`${API_BASE}/leaves/requests`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -497,7 +499,7 @@ function AppInner() {
     const interval = setInterval(checkUnread, 5000);
     return () => clearInterval(interval);
   }, [token]);
-// 🟢 VERIFICACIÓN DE PERMISOS DE PUBLICACIONES SOCIALES
+
   useEffect(() => {
     if (token && user) {
       const userPos = (user.position || "").toLowerCase();
@@ -717,8 +719,8 @@ function AppInner() {
     setCompanySaveError("");
 
     const url = editingCompany
-      ? `${API_BASE}/api/companies/${editingCompany.id}`
-      : "${API_BASE}/api/companies";
+      ? `${API_BASE}/companies/${editingCompany.id}`
+      : `${API_BASE}/companies`;
     const method = editingCompany ? "PUT" : "POST";
 
     try {
@@ -747,7 +749,7 @@ function AppInner() {
   async function deleteCompany(companyId) {
     if (!window.confirm("¿Estás seguro de eliminar esta empresa?")) return;
     try {
-      const res = await fetch(`${API_BASE}/api/companies/${companyId}`, {
+      const res = await fetch(`${API_BASE}/companies/${companyId}`, {
         method: "DELETE",
         headers: { "Authorization": `Bearer ${token}` }
       });
@@ -767,7 +769,7 @@ function AppInner() {
     if (!deptName || !deptName.trim()) return;
 
     try {
-      const res = await fetch(`${API_BASE}/api/companies/${companyId}/departments`, {
+      const res = await fetch(`${API_BASE}/companies/${companyId}/departments`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -788,7 +790,7 @@ function AppInner() {
   async function handleDeleteDept(deptId) {
     if (!window.confirm("¿Eliminar este departamento?")) return;
     try {
-      const res = await fetch(`${API_BASE}/api/companies/departments/${deptId}`, {
+      const res = await fetch(`${API_BASE}/companies/departments/${deptId}`, {
         method: "DELETE",
         headers: { "Authorization": `Bearer ${token}` }
       });
@@ -955,8 +957,7 @@ function AppInner() {
     }
   }
 
-  
-async function exportBajasToExcel() {
+  async function exportBajasToExcel() {
     const bajasList = employees.filter(e => e.employment_status === "baja");
     if (bajasList.length === 0) {
       alert("No hay registros de bajas para exportar.");
@@ -966,7 +967,6 @@ async function exportBajasToExcel() {
     const workbook = new Workbook.Workbook();
     const worksheet = workbook.addWorksheet("Historial Bajas");
 
-    // 1. Encabezados requeridos
     const headers = [
       "Empresa", 
       "Nombre Completo (Apellidos Nombre)", 
@@ -977,21 +977,17 @@ async function exportBajasToExcel() {
     const headerRow = worksheet.addRow(headers);
     headerRow.height = 24;
     headerRow.eachCell((cell) => {
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '1B4B43' } }; // Verde Núcleo RH
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '1B4B43' } };
       cell.font = { color: { argb: 'FFFFFF' }, bold: true, size: 10 };
       cell.alignment = { vertical: 'middle', horizontal: 'center' };
     });
 
-    // 2. Iterar empleados armando el nombre por apellidos
     bajasList.forEach((e) => {
-      // Concatenar Apellido Paterno + Apellido Materno + Nombre
       const lastName = e.last_name || e.paternal_surname || "";
       const motherLastName = e.mother_last_name || e.maternal_surname || "";
       const firstName = e.first_name || e.names || "";
 
       const fullNameByLastNames = `${lastName} ${motherLastName} ${firstName}`.trim().toUpperCase() || "SIN NOMBRE";
-
-      // Formato de fecha
       const dischargeDate = e.termination_date || e.discharge_date ? String(e.termination_date || e.discharge_date).slice(0, 10) : "N/A";
 
       const row = worksheet.addRow([
@@ -1011,7 +1007,6 @@ async function exportBajasToExcel() {
       });
     });
 
-    // Ajustar ancho de columnas automáticamente
     worksheet.columns.forEach((column) => {
       let maxLen = 0;
       column.eachCell({ includeEmpty: true }, (cell) => {
@@ -1477,7 +1472,6 @@ async function exportBajasToExcel() {
           <SocialPublicationsModule token={token} user={user} api={api} />
         )}
 
-
         {view === "messages" && (
           <ChatModule token={token} user={user} api={api} />
         )}
@@ -1738,7 +1732,7 @@ async function exportBajasToExcel() {
                                       formData.append("sub_type", subTypeVal);
 
                                       try {
-                                        const res = await fetch(`${API_BASE}/api/companies/${c.id}/upload-template`, {
+                                        const res = await fetch(`${API_BASE}/companies/${c.id}/upload-template`, {
                                           method: "POST",
                                           headers: { Authorization: `Bearer ${token}` },
                                           body: formData
@@ -2728,7 +2722,7 @@ async function exportBajasToExcel() {
                     try {
                       alert("⏳ Procesando y empaquetando todos los documentos en formato ZIP...");
 
-                      const response = await fetch(`${API_BASE}/api/companies/${compId}/fill-template-batch`, {
+                      const response = await fetch(`${API_BASE}/companies/${compId}/fill-template-batch`, {
                         method: "POST",
                         headers: {
                           "Content-Type": "application/json",
@@ -2930,7 +2924,7 @@ async function exportBajasToExcel() {
               setPendingPdfFile(null);
             } catch (err) {
               alert("❌ Error: " + err.message);
-            } finally {
+            } flexally {
               setIsPdfSplitting(false);
             }
           }}
@@ -2999,7 +2993,7 @@ function LeaveModule({ token, isAdmin, myBalance, leaveRequests, leaveTypes, lea
 
   useEffect(() => {
     setLoadingCalendar(true);
-    fetch("${API_BASE}/api/leaves/department-calendar", {
+    fetch(`${API_BASE}/leaves/department-calendar`, {
       headers: { Authorization: `Bearer ${token}` }
     })
       .then(res => res.json())
@@ -3587,7 +3581,7 @@ function EmployeeDetail({
 
       formData.append("employee_data", JSON.stringify(employeeData));
 
-      const response = await fetch(`${API_BASE}/api/employees/${employee.id}/fill-custom-template`, {
+      const response = await fetch(`${API_BASE}/employees/${employee.id}/fill-custom-template`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`
@@ -3632,7 +3626,7 @@ function EmployeeDetail({
   async function handleMoveFile(fileId, newCategory) {
     if (!newCategory || !employee) return;
     try {
-      const res = await fetch(`${API_BASE}/api/employees/${employee.id}/files/${fileId}/move`, {
+      const res = await fetch(`${API_BASE}/employees/${employee.id}/files/${fileId}/move`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -3730,7 +3724,7 @@ function EmployeeDetail({
                 type="button"
                 onClick={async () => {
                   try {
-                    const response = await fetch(`${API_BASE}/api/employees/${employee.id}/download-all`, {
+                    const response = await fetch(`${API_BASE}/employees/${employee.id}/download-all`, {
                       headers: { Authorization: `Bearer ${token}` }
                     });
 
@@ -3811,7 +3805,7 @@ function EmployeeDetail({
                           type="button"
                           onClick={async () => {
                             try {
-                              const tmplRes = await fetch(`${API_BASE}/api/companies/${employee.company_id}/templates`, {
+                              const tmplRes = await fetch(`${API_BASE}/companies/${employee.company_id}/templates`, {
                                 headers: { Authorization: `Bearer ${token}` }
                               });
                               const compTemplates = tmplRes.ok ? await tmplRes.json() : [];
@@ -3842,7 +3836,7 @@ function EmployeeDetail({
 
                               alert(`⏳ Generando ${docType} (${selectedSubType || 'General'}) para ${employee.first_name}...`);
 
-                              const response = await fetch(`${API_BASE}/api/companies/${employee.company_id}/fill-template`, {
+                              const response = await fetch(`${API_BASE}/companies/${employee.company_id}/fill-template`, {
                                 method: "POST",
                                 headers: {
                                   "Content-Type": "application/json",
