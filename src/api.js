@@ -1,7 +1,6 @@
 // src/api.js
 
-// src/api.js
-export const API_BASE = import.meta.env.VITE_API_URL || "https://ucleo-rh-backend-production.up.railway.app/api";
+const rawUrl = import.meta.env.VITE_API_URL || "https://ucleo-rh-backend-production.up.railway.app/api";
 const cleanUrl = rawUrl.replace(/\/$/, "");
 
 // 🟢 Si la URL ya termina en /api la deja tal cual, si no, se lo agrega
