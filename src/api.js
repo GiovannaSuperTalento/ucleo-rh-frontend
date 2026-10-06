@@ -492,4 +492,82 @@ export const api = {
       },
       body: JSON.stringify({ group_ids }),
     }).then((res) => handleResponse(res, "Error al asignar grupos al anuncio.")),
+
+  // ATS de reclutamiento
+  getAtsVacancies: (token) =>
+    fetch(`${API_BASE}/ats/vacancies`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "Error al cargar vacantes.")),
+
+  createAtsVacancy: (token, payload) =>
+    fetch(`${API_BASE}/ats/vacancies`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    }).then((res) => handleResponse(res, "Error al crear la vacante.")),
+
+  updateAtsVacancy: (token, id, payload) =>
+    fetch(`${API_BASE}/ats/vacancies/${id}`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    }).then((res) => handleResponse(res, "Error al actualizar la vacante.")),
+
+  getAtsApplications: (token, vacancyId, search = "") => {
+    const params = new URLSearchParams();
+    if (vacancyId) params.set("vacancy_id", vacancyId);
+    if (search.trim()) params.set("search", search.trim());
+    return fetch(`${API_BASE}/ats/applications?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "Error al cargar candidatos."));
+  },
+
+  createAtsApplication: (token, vacancyId, formData) =>
+    fetch(`${API_BASE}/ats/vacancies/${vacancyId}/applications`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    }).then((res) => handleResponse(res, "Error al registrar candidato.")),
+
+  updateAtsApplicationStage: (token, id, stage) =>
+    fetch(`${API_BASE}/ats/applications/${id}/stage`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ stage }),
+    }).then((res) => handleResponse(res, "Error al actualizar la etapa.")),
+
+  getAtsActivities: (token, id) =>
+    fetch(`${API_BASE}/ats/applications/${id}/activities`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "Error al cargar el seguimiento.")),
+
+  addAtsActivity: (token, id, content) =>
+    fetch(`${API_BASE}/ats/applications/${id}/activities`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ content }),
+    }).then((res) => handleResponse(res, "Error al guardar la nota.")),
+
+  downloadAtsCv: async (token, id) => {
+    const res = await fetch(`${API_BASE}/ats/applications/${id}/cv`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) await handleResponse(res, "Error al descargar el CV.");
+    const disposition = res.headers.get("content-disposition") || "";
+    const match = disposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+    const filename = decodeURIComponent(match?.[1] || match?.[2] || "CV-candidato");
+    return { blob: await res.blob(), filename };
+  },
 };

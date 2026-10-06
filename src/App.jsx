@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import {
   LayoutDashboard, Users, CalendarDays, LogOut, Plus, Check, X,
   Search, ChevronRight, Building2, Clock, ArrowLeft, RefreshCw,
-  User, Briefcase, DollarSign, Siren, History, Loader2, KeyRound, Copy, Trash2, Camera, MessageSquare, Download, FolderDown, FileSpreadsheet, Send, Info, Calendar, Key, Shield, CheckCircle
+  User, Briefcase, DollarSign, Siren, History, Loader2, KeyRound, Copy, Trash2, Camera, MessageSquare, Download, FolderDown, FileSpreadsheet, Send, Info, Calendar, Key, Shield, CheckCircle, Share2
 } from "lucide-react";
 import Workbook from "exceljs";
 import { api, API_BASE } from "./api";
@@ -11,7 +11,7 @@ import ChatModule from "./ChatModule";
 import StickyNotes from "./components/dashboard/StickyNotes";
 import { PdfSplitModal } from "./components/PdfSplitModal";
 import { SocialPublicationsModule } from "./components/SocialPublicationsModule";
-import { Share2 } from "lucide-react";
+import RecruitmentModule from "./components/RecruitmentModule";
 
 const C = {
   bg: "#F3F5F4", surface: "#FFFFFF", ink: "#1B2A2E", inkSoft: "#5B6B6E", line: "#E1E6E4",
@@ -563,7 +563,7 @@ function AppInner() {
   }, [showAddEmployee, editingEmployeeId, formTab]);
 
   useEffect(() => {
-    if (token && (view === "companies" || showAddEmployee || showExportAltasModal || view === "employees")) loadCompanies();
+    if (token && (view === "companies" || showAddEmployee || showExportAltasModal || view === "employees" || view === "ats")) loadCompanies();
   }, [token, view, showAddEmployee, showExportAltasModal]);
 
   useEffect(() => {
@@ -1417,6 +1417,7 @@ function AppInner() {
     { key: "dashboard", label: "Panel", icon: LayoutDashboard },
     { key: "messages", label: "Mensajería", icon: MessageSquare },
     ...((isAdmin || canAccessSocial) ? [{ key: "social", label: "Publicaciones", icon: Share2 }] : []),
+    ...((isAdmin || canAccessSocial) ? [{ key: "ats", label: "Reclutamiento", icon: Briefcase }] : []),
     { key: "profile", label: "Mi Perfil", icon: User },
     ...(isAdmin ? [{ key: "employees", label: "Empleados", icon: Users }] : []),
     { key: "orgchart", label: "Organigrama", icon: Building2 },
@@ -1478,6 +1479,10 @@ function AppInner() {
 
         {view === "social" && (
           <SocialPublicationsModule token={token} user={user} api={api} />
+        )}
+
+        {view === "ats" && (isAdmin || canAccessSocial) && (
+          <RecruitmentModule token={token} companies={companies} api={api} />
         )}
 
         {view === "messages" && (
