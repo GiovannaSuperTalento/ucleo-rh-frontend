@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Send, MessageSquare, Loader2, RefreshCw, Search, Image as ImageIcon, Smile, X } from "lucide-react";
 import { API_BASE } from "./api";
+import { formatMessageTime } from "./utils/formatMessageTime";
+import ChatStickerPicker from "./components/ChatStickerPicker";
 
 // 🟢 HELPER RESILIENTE PARA RESOLVER FOTOS O INICIALES EN EL CHAT
 function getChatAvatar(c) {
@@ -310,7 +312,7 @@ export default function ChatModule({ token, user, api, unreadBySender = {} }) {
                       )}
                       {m.message && <p className={`${m.message_type === "sticker" ? "text-5xl leading-tight" : "whitespace-pre-line"}`}>{m.message}</p>}
                       <p className={`text-[9px] mt-1 text-right ${isMine ? "text-emerald-200/80" : "text-slate-400"}`}>
-                        {m.created_at ? new Date(m.created_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }) : ""}
+                        {formatMessageTime(m.created_at)}
                       </p>
                     </div>
                   </div>
@@ -325,11 +327,7 @@ export default function ChatModule({ token, user, api, unreadBySender = {} }) {
             </div>
 
             {showStickers && (
-              <div className="flex flex-wrap gap-2 border-t border-slate-100 bg-white px-3 py-2" aria-label="Stickers">
-                {["😀", "😂", "🥰", "🤗", "🎉", "👍", "👏", "❤️", "🔥", "✨", "😎", "🙌"].map(sticker => (
-                  <button key={sticker} type="button" onClick={() => handleSendSticker(sticker)} aria-label={`Enviar sticker ${sticker}`} className="rounded-lg p-1 text-2xl hover:bg-slate-100">{sticker}</button>
-                ))}
-              </div>
+              <ChatStickerPicker onSelect={handleSendSticker} />
             )}
             {attachment && (
               <div className="flex items-center gap-2 border-t border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600">

@@ -1,11 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, Image as ImageIcon, Loader2, MessageSquare, RefreshCw, Search, Send, Smile, X } from "lucide-react";
-
-function formatMessageTime(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" });
-}
+import { formatMessageTime } from "../utils/formatMessageTime";
+import ChatStickerPicker from "./ChatStickerPicker";
 
 export default function FloatingChatWidget({
   token,
@@ -204,7 +200,7 @@ export default function FloatingChatWidget({
                 <div ref={messagesEndRef} />
               </div>
               {error && <p role="alert" className="border-t border-rose-100 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">{error}</p>}
-              {showStickers && <div className="flex flex-wrap gap-1 border-t border-slate-100 bg-white px-3 py-2">{["😀", "😂", "🥰", "🤗", "🎉", "👍", "👏", "❤️", "🔥", "✨", "😎", "🙌"].map(sticker => <button key={sticker} type="button" onClick={() => sendSticker(sticker)} aria-label={`Enviar sticker ${sticker}`} className="rounded-lg p-1 text-2xl hover:bg-slate-100">{sticker}</button>)}</div>}
+              {showStickers && <ChatStickerPicker onSelect={sendSticker} />}
               {attachment && <div className="flex items-center gap-2 border-t border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600"><ImageIcon size={14} /><span className="min-w-0 flex-1 truncate">{attachment.name}</span><button type="button" onClick={() => setAttachment(null)} aria-label="Quitar imagen" className="rounded p-1 hover:bg-white"><X size={14} /></button></div>}
               <form onSubmit={sendMessage} className="flex items-center gap-2 border-t border-slate-200 p-3">
                 <input ref={attachmentInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={event => { setAttachment(event.target.files?.[0] || null); event.target.value = ""; }} />
