@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { API_BASE } from "../api";
 
 export function RegisterTeamModule({ onRegisterSuccess, onSwitchToLogin }) {
   const [formData, setFormData] = useState({ team_name: "", full_name: "", user_email: "", password: "" });
@@ -8,7 +9,7 @@ export function RegisterTeamModule({ onRegisterSuccess, onSwitchToLogin }) {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch("http://localhost:4000/api/auth/register-team", {
+      const res = await fetch(`${API_BASE}/auth/register-team`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(formData)

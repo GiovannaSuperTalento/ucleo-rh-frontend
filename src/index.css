@@ -1,1 +1,30 @@
-@import "tailwindcss"
+@import "tailwindcss";
+
+#app-shell,
+#app-shell * {
+  font-family: var(--user-font-family, Inter, sans-serif) !important;
+}
+
+#app-shell [class~="bg-[#1B4B43]"] {
+  background-color: var(--user-primary, #1B4B43) !important;
+}
+
+#app-shell [class~="text-[#1B4B43]"] {
+  color: var(--user-primary, #1B4B43) !important;
+}
+
+#app-shell [class~="border-[#1B4B43]"] {
+  border-color: var(--user-primary, #1B4B43) !important;
+}
+
+#app-shell[data-icon-shape="square"] button[aria-label]:has(> svg) {
+  border-radius: 0.35rem !important;
+}
+
+#app-shell[data-icon-shape="rounded"] button[aria-label]:has(> svg) {
+  border-radius: 0.75rem !important;
+}
+
+#app-shell[data-icon-shape="circle"] button[aria-label]:has(> svg) {
+  border-radius: 9999px !important;
+}

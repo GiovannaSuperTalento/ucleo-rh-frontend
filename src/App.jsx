@@ -1,21 +1,29 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import {
   LayoutDashboard, Users, CalendarDays, LogOut, Plus, Check, X,
   Search, ChevronRight, Building2, Clock, ArrowLeft, RefreshCw,
-  User, Briefcase, DollarSign, Siren, History, Loader2, KeyRound, Copy, Trash2, Camera, MessageSquare, Download, FolderDown, FileSpreadsheet, Send, Info, Calendar, Key, Shield, CheckCircle, Share2
+  User, Briefcase, DollarSign, Siren, History, Loader2, KeyRound, Copy, Trash2, Camera, MessageSquare, Download, FolderDown, FileSpreadsheet, Send, Info, Calendar, Key, Shield, CheckCircle, Share2, Eye, Pencil
 } from "lucide-react";
 import Workbook from "exceljs";
 import { api, API_BASE } from "./api";
 import WorkspaceDashboard from "./components/WorkspaceDashboard";
 import ChatModule from "./ChatModule";
+import FloatingChatWidget from "./components/FloatingChatWidget";
 import StickyNotes from "./components/dashboard/StickyNotes";
 import { PdfSplitModal } from "./components/PdfSplitModal";
 import { SocialPublicationsModule } from "./components/SocialPublicationsModule";
 import RecruitmentModule from "./components/RecruitmentModule";
+import InternalVacanciesPortal from "./components/InternalVacanciesPortal";
+import PublicAssessment from "./components/PublicAssessment";
+import DocumentFormatsStudio from "./components/DocumentFormatsStudio";
+import { formatDateInSpanishWords } from "./utils/dateWords";
+import GeneratedCompanyDocumentPreview from "./components/GeneratedCompanyDocumentPreview";
+import { APPEARANCE_THEMES } from "./components/AppearanceSettings";
+import { formatDate } from "./utils/formatDate";
 
 const C = {
   bg: "#F3F5F4", surface: "#FFFFFF", ink: "#1B2A2E", inkSoft: "#5B6B6E", line: "#E1E6E4",
-  primary: "#1B4B43", primarySoft: "#E7EFEC", accent: "#C6793D", accentSoft: "#FBEBDC",
+  primary: "var(--user-primary, #1B4B43)", primarySoft: "var(--user-primary-soft, #E7EFEC)", accent: "#C6793D", accentSoft: "#FBEBDC",
   ok: "#2F7D5A", okSoft: "#E4F3EB", danger: "#B14444", dangerSoft: "#F7E7E5",
 };
 
@@ -34,6 +42,13 @@ function getCleanPhotoUrl(url) {
   if (clean.startsWith("http://") || clean.startsWith("https://")) return clean;
   const baseUrl = API_BASE.replace(/\/api$/, "");
   return `${baseUrl}${clean.startsWith("/") ? clean : `/${clean}`}`;
+}
+
+function normalizeManagedUserRole(value) {
+  const role = String(value || "").trim().toLowerCase();
+  if (["admin", "administrator"].includes(role)) return "admin";
+  if (["reclutamiento", "reclutador", "recruiter", "reclu"].includes(role)) return "reclutamiento";
+  return "empleado";
 }
 
 // 🟢 HELPER COMPARADOR SEGURO DE UUIDS DE EMPRESAS Y COLABORADORES
@@ -67,8 +82,91 @@ function isSameCompany(employeeOrId, filterCompanyId) {
 }
 
 const DEPARTMENTS = ["Recursos Humanos", "Sistemas", "Ventas", "Finanzas", "Operaciones"];
+const normalizeDepartmentKey = (value) => String(value || "")
+  .trim()
+  .replace(/\s+/g, " ")
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .toLocaleLowerCase("es-MX");
+const COMPANY_TEMPLATE_DOCUMENT_TYPES = [
+  "Contratos",
+  "Convenio",
+  "Convenio de Confidencialidad",
+  "Aviso de Privacidad",
+  "ADDENDUM",
+  "Constancia laboral",
+  "Carta de recomendación",
+  "Carta para guardería",
+  "Carta probatoria de domicilio",
+  "Formatos Varios",
+];
+const normalizeCompanyDocumentType = (value) => String(value || "")
+  .trim()
+  .normalize("NFD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .replace(/\s+/g, " ")
+  .toLocaleLowerCase("es-MX");
+const companyDocumentTypeMatches = (configuredType, requestedType) => {
+  const configured = normalizeCompanyDocumentType(configuredType);
+  const requested = normalizeCompanyDocumentType(requestedType);
+  if (configured === requested) return true;
+  const confidentialityAgreementTypes = new Set(["convenio", "convenio de confidencialidad"]);
+  const contractTypes = new Set(["contratos", "contrato firmado"]);
+  return (confidentialityAgreementTypes.has(configured) && confidentialityAgreementTypes.has(requested))
+    || (contractTypes.has(configured) && contractTypes.has(requested));
+};
+const BATCH_FILE_CATEGORIES = [
+  "Expediente Completo",
+  "Todos los CV y solicitudes",
+  "Todas las identificaciones (INE / pasaporte)",
+  "Todos los comprobantes",
+  "Todas las constancias",
+  "Todos los estados de cuenta",
+  "Todos los comprobantes de estudio",
+  "CV / Solicitud de Empleo",
+  "Identificación Oficial (INE / Pasaporte)",
+  "Comprobante de Domicilio",
+  "Acta de Nacimiento",
+  "CURP",
+  "RFC (Constancia de Situación Fiscal)",
+  "NSS (Número de Seguro Social)",
+  "Comprobante de Estudios",
+  "Estado de Cuenta Bancaria",
+  "Comprobantes de Nómina",
+  "Constancia de Trabajo",
+  "Carta de Recomendación",
+  "Contratos",
+  "ADDENDUM",
+  "Convenio de Confidencialidad",
+  "Aviso de Privacidad",
+  "Formatos Varios",
+  "Políticas de RH",
+  "Descriptivo de Puesto",
+  "Requisición",
+  "Test de Integridad",
+];
 const STATUS_OPTIONS = ["activo", "baja", "incapacidad", "permiso"];
 const CONTRACT_TYPES = ["Indeterminado", "Determinado", "Periodo de prueba 90 días", "Periodo de prueba 180 días"];
+const PAYROLL_OPTIONS = [
+  { id: "SEM", name: "Semanal" },
+  { id: "QUI", name: "Quincenal" },
+  { id: "DIA", name: "Diario" },
+  { id: "MEN", name: "Mensual" },
+];
+const PAY_PERIODS_PER_MONTH = { SEM: 52 / 12, QUI: 2, DIA: 30, MEN: 1 };
+const normalizePayrollType = (value) => {
+  const normalized = String(value || "QUI").trim().toUpperCase();
+  if (["SEM", "SEMANAL"].includes(normalized)) return "SEM";
+  if (["DIA", "DIARIO", "DIARIA"].includes(normalized)) return "DIA";
+  if (["MEN", "MENSUAL", "MES"].includes(normalized)) return "MEN";
+  return "QUI";
+};
+const periodAmountFromMonthly = (monthly, type) => {
+  const periods = PAY_PERIODS_PER_MONTH[normalizePayrollType(type)];
+  return Number((Number(monthly || 0) / periods).toFixed(2));
+};
+const monthlyAmountFromPeriod = (amount, type) =>
+  Number((Number(amount || 0) * PAY_PERIODS_PER_MONTH[normalizePayrollType(type)]).toFixed(2));
 
 const LOGIN_SLIDES = [
   { url: "https://images.unsplash.com/photo-1556910103-1c02745aae4d?q=80&w=1200&auto=format&fit=crop" },
@@ -84,15 +182,97 @@ const emptyEmployee = () => ({
   gender: "", marital_status: "", education_level: "", last_grade: "", personal_email: "", phone: "", mobile_phone: "",
   street: "", exterior_number: "", interior_number: "", neighborhood: "", postal_code: "", municipality: "", state: "", address: "",
   fiscal_street: "", fiscal_exterior_number: "", fiscal_interior_number: "", fiscal_neighborhood: "", fiscal_postal_code: "", fiscal_municipality: "", fiscal_state: "", same_as_personal_address: false,
-  department: DEPARTMENTS[0], position: "", job_activities: "", manager_id: "", company_id: "", hire_date: "", employment_status: "activo",
+  department: DEPARTMENTS[0], position: "", job_activities: "", manager_id: "", company_id: "", hire_date: "", recognized_seniority_date: "", employment_status: "activo",
   termination_date: "", contract_start_date: "", contract_end_date: "", contract_type: CONTRACT_TYPES[0], probation_end_date: "",
   work_schedule: "Lunes a Viernes de 09:00 a 18:00 hrs",
-  base_daily_salary: "", sdi_salary: "", base_salary: "", payroll_type: "QUI",
+  base_daily_salary: "", sdi_salary: "", base_salary: "", pay_period_salary: "", payroll_type: "QUI",
   has_infonavit_credit: "NO", infonavit_credit_number: "", infonavit_discount_value: "",
   bank_name: "", bank_account: "", bank_clabe: "",
   emergency_contact_name: "", emergency_contact_relationship: "", emergency_contact_phone: "",
   beneficiary_name: "", beneficiary_relationship: "", beneficiary_phone: "",
 });
+
+const employeeDateLabels = {
+  birth_date: "Fecha de nacimiento",
+  hire_date: "Fecha de alta",
+  recognized_seniority_date: "Fecha de ingreso reconocida para antigüedad",
+  termination_date: "Fecha de baja",
+  rehire_date: "Fecha de reingreso",
+  contract_start_date: "Fecha de inicio de contrato",
+  contract_end_date: "Fecha de término de contrato",
+  probation_end_date: "Fin del periodo de prueba",
+};
+
+function normalizeEmployeeDate(value) {
+  if (value === null || value === undefined || value === "") return { valid: true, value: null };
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return { valid: false };
+    const year = value.getUTCFullYear();
+    const month = String(value.getUTCMonth() + 1).padStart(2, "0");
+    const day = String(value.getUTCDate()).padStart(2, "0");
+    return { valid: true, value: `${year}-${month}-${day}` };
+  }
+  if (typeof value !== "string") return { valid: false };
+
+  const raw = value.trim();
+  const isoMatch = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})(?:T.*)?$/);
+  const dmyMatch = raw.match(/^(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4})$/);
+  const ymdMatch = raw.match(/^(\d{4})[/.](\d{1,2})[/.](\d{1,2})$/);
+  const parts = isoMatch
+    ? [Number(isoMatch[1]), Number(isoMatch[2]), Number(isoMatch[3])]
+    : dmyMatch
+      ? [Number(dmyMatch[3]), Number(dmyMatch[2]), Number(dmyMatch[1])]
+      : ymdMatch
+        ? [Number(ymdMatch[1]), Number(ymdMatch[2]), Number(ymdMatch[3])]
+        : null;
+  if (!parts) return { valid: false };
+  const [year, month, day] = parts;
+  const date = new Date(Date.UTC(year, month - 1, day));
+  const valid = date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+  return valid ? { valid: true, value: `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}` } : { valid: false };
+}
+
+function worksheetValueText(value) {
+  if (value === null || value === undefined) return "";
+  if (value instanceof Date) return value.toISOString().slice(0, 10);
+  if (typeof value === "object") {
+    if (Array.isArray(value.richText)) return value.richText.map(part => part.text || "").join("");
+    if (value.text !== undefined) return String(value.text);
+    if (value.result !== undefined) return worksheetValueText(value.result);
+    if (value.hyperlink) return String(value.text || value.hyperlink);
+    return "";
+  }
+  return String(value);
+}
+
+function applyReadableWorksheetLayout(worksheet, { minWidth = 12, maxWidth = 36, baseRowHeight = 20 } = {}) {
+  worksheet.properties.defaultRowHeight = baseRowHeight;
+  worksheet.columns.forEach(column => {
+    let maxLength = 0;
+    column.eachCell({ includeEmpty: false }, cell => {
+      maxLength = Math.max(maxLength, ...worksheetValueText(cell.value).split(/\r?\n/).map(line => line.length));
+    });
+    column.width = Math.min(maxWidth, Math.max(minWidth, maxLength + 2));
+  });
+
+  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    let requiredLines = 1;
+    row.eachCell({ includeEmpty: false }, (cell, columnNumber) => {
+      const width = worksheet.getColumn(columnNumber).width || minWidth;
+      const lines = worksheetValueText(cell.value).split(/\r?\n/);
+      const wrappedLines = lines.reduce((total, line) => total + Math.max(1, Math.ceil(line.length / Math.max(8, width - 2))), 0);
+      requiredLines = Math.max(requiredLines, wrappedLines);
+      cell.alignment = {
+        ...(cell.alignment || {}),
+        vertical: rowNumber === 1 ? "middle" : (cell.alignment?.vertical || "top"),
+        horizontal: cell.alignment?.horizontal || "left",
+        wrapText: true,
+      };
+    });
+    const estimatedHeight = Math.max(baseRowHeight, requiredLines * 14 + 6);
+    row.height = Math.max(Number(row.height) || 0, estimatedHeight);
+  });
+}
 
 function initials(name) {
   return (name || "").split(" ").filter(Boolean).slice(0, 2).map(w => w[0]).join("").toUpperCase();
@@ -107,17 +287,20 @@ function Badge({ tone = "default", children }) {
   return <span className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium" style={{ background: t.bg, color: t.fg }}>{children}</span>;
 }
 
-function TextField({ label, value, onChange, type = "text", required, placeholder, options }) {
+function TextField({ label, value, onChange, type = "text", required, placeholder, options, list, suggestions = [], onBlur, readOnly = false }) {
   return (
     <div>
       <label className="text-xs font-medium block mb-1.5" style={{ color: C.inkSoft }}>{label}{required && <span style={{ color: C.danger }}> *</span>}</label>
       {options ? (
-        <select value={value || ""} onChange={onChange} className="w-full px-3 py-2.5 rounded-lg text-sm outline-none bg-white" style={{ border: `1px solid ${C.line}` }}>
+        <select value={value || ""} onChange={onChange} disabled={readOnly} className="w-full px-3 py-2.5 rounded-lg text-sm outline-none bg-white disabled:opacity-75" style={{ border: `1px solid ${C.line}` }}>
           <option value="">Selecciona…</option>
           {options.map(o => <option key={o.id || o} value={o.id || o}>{o.name || o.legal_name || o.full_name || o}</option>)}
         </select>
       ) : (
-        <input type={type} value={value || ""} onChange={onChange} placeholder={placeholder} className="w-full px-3 py-2.5 rounded-lg text-sm outline-none bg-white" style={{ border: `1px solid ${C.line}` }} />
+        <>
+        <input type={type} value={value || ""} onChange={onChange} onBlur={onBlur} list={list} readOnly={readOnly} placeholder={placeholder} className="w-full px-3 py-2.5 rounded-lg text-sm outline-none bg-white" style={{ border: `1px solid ${C.line}`, ...(readOnly ? { background: "#F8FAF9", color: C.inkSoft } : {}) }} />
+          {list && <datalist id={list}>{suggestions.map(item => <option key={item.id || item.position} value={item.position || item} />)}</datalist>}
+        </>
       )}
     </div>
   );
@@ -145,7 +328,7 @@ class ErrorBoundary extends React.Component {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen w-full flex items-center justify-center p-6" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+        <div className="min-h-screen w-full flex items-center justify-center p-6" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }} translate="no" lang="es">
           <div className="max-w-sm text-center rounded-2xl p-7" style={{ background: C.surface, border: `1px solid ${C.line}` }}>
             <h1 className="text-lg font-semibold mb-2" style={{ color: C.ink }}>Algo salió mal</h1>
             <p className="text-sm mb-5" style={{ color: C.inkSoft }}>Ocurrió un error inesperado en la página. Recárgala para continuar.</p>
@@ -159,9 +342,10 @@ class ErrorBoundary extends React.Component {
 }
 
 export default function App() {
+  const candidateToken = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("evaluacion");
   return (
     <ErrorBoundary>
-      <AppInner />
+      {candidateToken ? <PublicAssessment candidateToken={candidateToken} /> : <AppInner />}
     </ErrorBoundary>
   );
 }
@@ -200,7 +384,19 @@ function AppInner() {
   const [resetLoading, setResetLoading] = useState(false);
 
   const [view, setView] = useState("dashboard");
+  const [appearance, setAppearance] = useState({ themeId: "default", backgroundImage: "", accentColor: "green", fontFamily: "inter", iconShape: "rounded" });
+  const [appearanceSaving, setAppearanceSaving] = useState(false);
+  const [appearanceSaved, setAppearanceSaved] = useState(false);
+  const [appearanceError, setAppearanceError] = useState("");
   const [unreadCount, setUnreadCount] = useState(0);
+  const [unreadBySender, setUnreadBySender] = useState({});
+  const [incomingChatNotification, setIncomingChatNotification] = useState(null);
+  const [openChatContact, setOpenChatContact] = useState(null);
+  const seenChatNotificationIds = useRef(new Set());
+  const updateUnreadMessages = useCallback(data => {
+    setUnreadCount(data?.count || 0);
+    setUnreadBySender(data?.bySender || {});
+  }, []);
 
   const [employees, setEmployees] = useState([]);
   const [employeesLoading, setEmployeesLoading] = useState(false);
@@ -209,6 +405,7 @@ function AppInner() {
   const [employeeStatusTab, setEmployeeStatusTab] = useState("activo");
 
   const [selectedCompanyFilter, setSelectedCompanyFilter] = useState(null);
+  const [selectedEmployeeDepartment, setSelectedEmployeeDepartment] = useState(null);
 
   const [selectedEmployeeId, setSelectedEmployeeId] = useState(null);
   const [selectedEmployee, setSelectedEmployee] = useState(null);
@@ -219,22 +416,63 @@ function AppInner() {
   const [newEmployee, setNewEmployee] = useState(emptyEmployee());
   const [savingEmployee, setSavingEmployee] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [positionProfiles, setPositionProfiles] = useState([]);
   const [employeeHistory, setEmployeeHistory] = useState([]);
   const [photoUploading, setPhotoUploading] = useState(false);
   const [employeeFiles, setEmployeeFiles] = useState([]);
   const [fileUploading, setFileUploading] = useState(false);
 
-  // 🟢 ESTADOS PARA EL MODAL DE DIVISIÓN DE PDF
   const [pendingPdfFile, setPendingPdfFile] = useState(null);
   const [isPdfModalOpen, setIsPdfModalOpen] = useState(false);
   const [isSplittingPdf, setIsPdfSplitting] = useState(false);
 
   const [showExportAltasModal, setShowAddExportAltasModal] = useState(false);
+  const [exportMode, setExportMode] = useState("altas"); // "altas" | "bajas"
   const [exportFilterType, setExportFilterType] = useState("all");
   const [exportSelectedCompanyId, setExportSelectedCompanyId] = useState("");
   const [exportSelectedEmployeeId, setExportSelectedEmployeeId] = useState("");
+  const [exportGender, setExportGender] = useState("");
+  const [exportSchedule, setExportSchedule] = useState("");
+  const [exportMinAge, setExportMinAge] = useState("");
+  const [exportMaxAge, setExportMaxAge] = useState("");
+
+  // Filtros de la lista de empleados en pantalla (género, horario, edad)
+  const [listGenderFilter, setListGenderFilter] = useState("");
+  const [listScheduleFilter, setListScheduleFilter] = useState("");
+  const [listMinAge, setListMinAge] = useState("");
+  const [listMaxAge, setListMaxAge] = useState("");
+
+  // Calcula edad a partir de la fecha de nacimiento
+  function getAge(birthDate) {
+    if (!birthDate) return null;
+    const b = new Date(birthDate);
+    if (isNaN(b.getTime())) return null;
+    const today = new Date();
+    let age = today.getFullYear() - b.getFullYear();
+    const m = today.getMonth() - b.getMonth();
+    if (m < 0 || (m === 0 && today.getDate() < b.getDate())) age--;
+    return age;
+  }
+
+  // Aplica los filtros extra (género, edad, horario) sobre una lista de empleados
+  function applyExtraExportFilters(list) {
+    return list.filter((e) => {
+      if (exportGender && e.gender !== exportGender) return false;
+      if (exportSchedule && e.work_schedule !== exportSchedule) return false;
+      if (exportMinAge || exportMaxAge) {
+        const age = getAge(e.birth_date);
+        if (age === null) return false;
+        if (exportMinAge && age < Number(exportMinAge)) return false;
+        if (exportMaxAge && age > Number(exportMaxAge)) return false;
+      }
+      return true;
+    });
+  }
 
   const [showBatchModal, setShowBatchModal] = useState(false);
+  const [batchMode, setBatchMode] = useState("generate");
+  const [batchCompanyId, setBatchCompanyId] = useState("");
+  const [batchEmployeeStatus, setBatchEmployeeStatus] = useState("activo");
   const [batchDocType, setBatchDocType] = useState("Contratos");
   const [batchSubType, setBatchSubType] = useState("Indeterminado");
   const [batchDepartment, setBatchDepartment] = useState("all");
@@ -257,25 +495,78 @@ function AppInner() {
 
   const [users, setUsers] = useState([]);
   const [usersLoading, setUsersLoading] = useState(false);
+  const [usersSearch, setUsersSearch] = useState("");
+  const [savingUserRoleId, setSavingUserRoleId] = useState(null);
 
   const [companies, setCompanies] = useState([]);
   const [companiesLoading, setCompaniesLoading] = useState(false);
+  const [expandedCompanyId, setExpandedCompanyId] = useState(null);
+  const [companySectionTabs, setCompanySectionTabs] = useState({});
   const [showAddCompany, setShowAddCompany] = useState(false);
+  const companyFormRef = useRef(null);
   const [newCompany, setNewCompany] = useState({ legal_name: "", rfc: "", address: "", imss_registry: "" });
+  const [newCompanyDepartments, setNewCompanyDepartments] = useState([""]);
+  const [companyLogoFile, setCompanyLogoFile] = useState(null);
+  const [companyTemplateTypeDrafts, setCompanyTemplateTypeDrafts] = useState({});
   const [editingCompany, setEditingCompany] = useState(null);
+  const [companyPositionProfiles, setCompanyPositionProfiles] = useState({});
+  const [positionProfileDraft, setPositionProfileDraft] = useState(null);
+  const [positionProfileSaving, setPositionProfileSaving] = useState(false);
+  const [positionProfileError, setPositionProfileError] = useState("");
+  const [positionProfileNotice, setPositionProfileNotice] = useState("");
+  const [positionDescriptiveFile, setPositionDescriptiveFile] = useState(null);
   const [deptInputs, setDeptInputs] = useState({});
   const [companySaving, setCompanySaving] = useState(false);
   const [companySaveError, setCompanySaveError] = useState("");
 
+  useEffect(() => {
+    if (!showAddCompany) return;
+    const frame = window.requestAnimationFrame(() => {
+      companyFormRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      companyFormRef.current?.querySelector("input")?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [showAddCompany, editingCompany]);
+
+  useEffect(() => {
+    if (view !== "companies" || !companies.length) return;
+    let active = true;
+    Promise.all(companies.map(async company => {
+      const response = await fetch(`${API_BASE}/employees/position-profiles?company_id=${encodeURIComponent(company.id)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) return [company.id, []];
+      const rows = await response.json().catch(() => []);
+      return [company.id, Array.isArray(rows) ? rows : []];
+    })).then(entries => {
+      if (active) setCompanyPositionProfiles(current => ({ ...current, ...Object.fromEntries(entries) }));
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [view, companies, token]);
+
   const [showAddUser, setShowAddUser] = useState(false);
-  const [newUser, setNewUser] = useState({ email: "", password: "", role: "empleado" });
+  const [newUser, setNewUser] = useState({ email: "", password: "", role: "empleado", display_name: "", department: "", position: "" });
   const [userSaveError, setUserSaveError] = useState("");
+  const [userSaveNotice, setUserSaveNotice] = useState("");
   const [userSaving, setUserSaving] = useState(false);
   const [lastCreatedPassword, setLastCreatedPassword] = useState("");
+  const [sendingAccessUserId, setSendingAccessUserId] = useState(null);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [firstPasswordError, setFirstPasswordError] = useState("");
+  const [firstPasswordSaving, setFirstPasswordSaving] = useState(false);
 
   const [currentSlide, setCurrentSlide] = useState(0);
 
-  const isAdmin = user?.role === "admin" || !user?.role || user?.role === "administrator";
+  const normalizedRole = String(user?.role || "").trim().toLowerCase();
+  const isAdmin = !normalizedRole || ["admin", "administrator"].includes(normalizedRole);
+  const isRecruitmentManager = ["reclutamiento", "reclutador", "recruiter"].includes(normalizedRole);
+  const normalizeAccessLabel = value => String(value || "").trim().toLocaleLowerCase("es-MX").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  const humanResourcesLabels = [user?.department, user?.position].map(normalizeAccessLabel);
+  const isHumanResources = Boolean(user?.has_full_data_access) || humanResourcesLabels.some(label =>
+    label === "rh" || label === "rrhh" || label === "hr" || label.includes("recursos humanos") || label.includes("human resources")
+  );
+  const hasFullMenuAccess = isAdmin || isRecruitmentManager || isHumanResources;
+  const canManageUsers = hasFullMenuAccess;
   const resetToken = useMemo(() => new URLSearchParams(window.location.search).get("resetToken"), []);
 
   const filteredEmployees = useMemo(() => {
@@ -283,6 +574,13 @@ function AppInner() {
     if (employeeStatusTab === "todos") return employees;
     return employees.filter(e => (e.employment_status || "activo") === employeeStatusTab);
   }, [employees, employeeStatusTab]);
+
+  const filteredUsers = useMemo(() => {
+    const query = usersSearch.trim().toLocaleLowerCase("es-MX");
+    if (!query) return users;
+    return users.filter(account => [account.email, account.role, account.is_active ? "activo" : "inactivo"]
+      .some(value => String(value || "").toLocaleLowerCase("es-MX").includes(query)));
+  }, [users, usersSearch]);
 
   const managerOptions = useMemo(() => {
     if (!Array.isArray(employees)) return [];
@@ -300,6 +598,20 @@ function AppInner() {
     const companyDeptNames = selectedComp.departments.map(d => d.name || d);
     return Array.from(new Set([...companyDeptNames, ...DEPARTMENTS]));
   }, [companies, newEmployee.company_id]);
+
+  useEffect(() => {
+    let active = true;
+    setPositionProfiles([]);
+    if (!showAddEmployee || !newEmployee.company_id) return () => { active = false; };
+    fetch(`${API_BASE}/employees/position-profiles?company_id=${encodeURIComponent(newEmployee.company_id)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(async response => {
+      if (!response.ok) throw new Error("No se pudieron cargar los perfiles de puesto");
+      return response.json();
+    }).then(rows => { if (active) setPositionProfiles(Array.isArray(rows) ? rows : []); })
+      .catch(() => { if (active) setPositionProfiles([]); });
+    return () => { active = false; };
+  }, [showAddEmployee, newEmployee.company_id, token]);
 
   async function loadEmployees(search = "") {
     setEmployeesLoading(true);
@@ -351,16 +663,26 @@ function AppInner() {
         const rawCompanies = Array.isArray(data) ? data : (data?.companies || []);
         const companiesWithTemplates = await Promise.all(rawCompanies.map(async (c) => {
           const cleanCompany = { ...c, id: String(c.id).trim() };
-          try {
-            const tmplRes = await fetch(`${API_BASE}/companies/${cleanCompany.id}/templates`, {
+          const [templatesResult, logoResult] = await Promise.allSettled([
+            fetch(`${API_BASE}/companies/${encodeURIComponent(cleanCompany.id)}/templates`, {
               headers: { Authorization: `Bearer ${token}` }
-            });
-            if (tmplRes.ok) {
-              const templatesData = await tmplRes.json();
-              return { ...cleanCompany, templates: Array.isArray(templatesData) ? templatesData : [] };
-            }
-          } catch (e) {}
-          return { ...cleanCompany, templates: [] };
+            }).then(async (response) => {
+              if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}));
+                throw new Error(errorData.message || `Error HTTP ${response.status}`);
+              }
+              return response.json();
+            }),
+            api.getCompanyDocumentLogo(token, cleanCompany.id),
+          ]);
+          const templatesData = templatesResult.status === "fulfilled" ? templatesResult.value : [];
+          const logoData = logoResult.status === "fulfilled" ? logoResult.value?.logo_data : null;
+          return {
+            ...cleanCompany,
+            templates: Array.isArray(templatesData) ? templatesData : [],
+            templates_load_error: templatesResult.status === "rejected" ? templatesResult.reason?.message || "No se pudieron cargar las plantillas." : null,
+            logo_data: logoData || null,
+          };
         }));
 
         setCompanies(companiesWithTemplates);
@@ -489,6 +811,7 @@ function AppInner() {
       alert(`✅ Contraseña actualizada correctamente para ${editingUserForPass.email}`);
       setEditingUserForPass(null);
       setNewUserPassword("");
+      await loadUsers();
     } catch (err) {
       alert("❌ Error: " + err.message);
     } finally {
@@ -497,24 +820,45 @@ function AppInner() {
   }
 
   useEffect(() => {
-    if (!token) return;
-    function checkUnread() {
-      if (api.getUnreadCount) {
-        api.getUnreadCount(token)
-          .then((data) => setUnreadCount(data?.count || 0))
-          .catch(() => setUnreadCount(0));
-      }
+    if (!token || !user) {
+      setUnreadCount(0);
+      setUnreadBySender({});
+      setIncomingChatNotification(null);
+      seenChatNotificationIds.current.clear();
+      return;
     }
-    checkUnread();
-    const interval = setInterval(checkUnread, 5000);
-    return () => clearInterval(interval);
-  }, [token]);
+    let active = true;
+    const pollMessages = async () => {
+      const [countResult, notificationResult] = await Promise.allSettled([
+        api.getUnreadCount(token),
+        api.getMessageNotifications(token),
+      ]);
+      if (!active) return;
+      if (countResult.status === "fulfilled") {
+        setUnreadCount(countResult.value?.count || 0);
+        setUnreadBySender(countResult.value?.bySender || {});
+      }
+      if (notificationResult.status === "fulfilled" && Array.isArray(notificationResult.value)) {
+        const notifications = notificationResult.value;
+        const unseen = notifications.filter(item => !seenChatNotificationIds.current.has(String(item.id)));
+        notifications.forEach(item => seenChatNotificationIds.current.add(String(item.id)));
+        if (unseen.length) setIncomingChatNotification(unseen[0]);
+      }
+    };
+    pollMessages();
+    const interval = setInterval(pollMessages, 5000);
+    return () => { active = false; clearInterval(interval); };
+  }, [token, user]);
+
+  useEffect(() => {
+    document.title = unreadCount > 0 ? `(${unreadCount}) Núcleo RH` : "Núcleo RH";
+  }, [unreadCount]);
 
   useEffect(() => {
     if (token && user) {
       const userPos = (user.position || "").toLowerCase();
       const isRecruiter = userPos.includes("reclutad") || userPos.includes("rh");
-      if (isAdmin || isRecruiter) {
+      if (hasFullMenuAccess || isRecruiter) {
         setCanAccessSocial(true);
       } else if (api && api.checkSocialPermission) {
         api.checkSocialPermission(token)
@@ -522,10 +866,12 @@ function AppInner() {
           .catch(() => setCanAccessSocial(false));
       }
     }
-  }, [token, user, isAdmin]);
+  }, [token, user, hasFullMenuAccess]);
 
   useEffect(() => {
     if (selectedEmployee) {
+      setSelectedTemplateId("");
+      setTemplates([]);
       loadEmployeeDocuments(selectedEmployee.id);
       loadEmployeeFiles(selectedEmployee.id);
       
@@ -539,7 +885,7 @@ function AppInner() {
       ];
 
       if (api.getTemplates) {
-        api.getTemplates(token)
+        api.getTemplates(token, selectedEmployee.company_id)
           .then(data => setTemplates(Array.isArray(data) && data.length > 0 ? data : defaultTemplates))
           .catch(() => setTemplates(defaultTemplates));
       } else {
@@ -554,7 +900,7 @@ function AppInner() {
           ]));
       }
     }
-  }, [selectedEmployee?.id]);
+  }, [selectedEmployee?.id, selectedEmployee?.company_id]);
 
   useEffect(() => {
     if (showAddEmployee && editingEmployeeId && formTab === "movimientos") {
@@ -567,7 +913,63 @@ function AppInner() {
   }, [token, view, showAddEmployee, showExportAltasModal]);
 
   useEffect(() => {
-    if (token && view === "users" && isAdmin) loadUsers();
+    if (!token) return;
+    let active = true;
+    api.getCurrentUser(token).then(profile => {
+      if (!active) return;
+      const refreshedUser = { ...user, ...profile };
+      setUser(refreshedUser);
+      localStorage.setItem("nucleo_rh_user", JSON.stringify(refreshedUser));
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) {
+      setAppearance({ themeId: "default", backgroundImage: "", accentColor: "green", fontFamily: "inter", iconShape: "rounded" });
+      return;
+    }
+    let active = true;
+    api.getUserPreferences(token).then(preferences => {
+      if (!active) return;
+      const nextAppearance = preferences?.appearance;
+      if (nextAppearance && typeof nextAppearance === "object") {
+        const validTheme = APPEARANCE_THEMES.some(theme => theme.id === nextAppearance.themeId);
+        setAppearance({
+          themeId: validTheme ? nextAppearance.themeId : "default",
+          backgroundImage: typeof nextAppearance.backgroundImage === "string" ? nextAppearance.backgroundImage : "",
+          attribution: nextAppearance.attribution && typeof nextAppearance.attribution === "object" ? nextAppearance.attribution : null,
+          accentColor: ["green", "blue", "violet", "coral", "amber"].includes(nextAppearance.accentColor) ? nextAppearance.accentColor : "green",
+          fontFamily: ["inter", "arial", "georgia", "trebuchet"].includes(nextAppearance.fontFamily) ? nextAppearance.fontFamily : "inter",
+          iconShape: ["rounded", "square", "circle"].includes(nextAppearance.iconShape) ? nextAppearance.iconShape : "rounded",
+        });
+      }
+    }).catch(error => {
+      if (active) console.warn("No se pudo cargar la apariencia guardada:", error.message);
+    });
+    return () => { active = false; };
+  }, [token]);
+
+  async function saveAppearance(nextAppearance) {
+    setAppearance(nextAppearance);
+    setAppearanceSaving(true);
+    setAppearanceSaved(false);
+    setAppearanceError("");
+    try {
+      const preferences = await api.saveUserPreferences(token, { appearance: nextAppearance });
+      setAppearance(preferences?.appearance || nextAppearance);
+      setAppearanceSaved(true);
+      return true;
+    } catch (error) {
+      setAppearanceError(error.message || "No se pudo guardar la apariencia.");
+      return false;
+    } finally {
+      setAppearanceSaving(false);
+    }
+  }
+
+  useEffect(() => {
+    if (token && view === "users" && canManageUsers) loadUsers();
   }, [token, view]);
 
   useEffect(() => {
@@ -611,7 +1013,7 @@ function AppInner() {
   async function submitResetPassword(e) {
     e.preventDefault();
     setResetError("");
-    if (newPassword.length < 6) { setResetError("La contraseña debe tener al menos 6 caracteres."); return; }
+    if (newPassword.length < 8) { setResetError("La contraseña debe tener al menos 8 caracteres."); return; }
     if (newPassword !== confirmPassword) { setResetError("Las contraseñas no coinciden."); return; }
     setResetLoading(true);
     try {
@@ -675,10 +1077,16 @@ function AppInner() {
     setGeneratingDoc(true);
     try {
       let res;
-      const isMulti = templates.find(t => t.id === selectedTemplateId)?.name === "Formato Múltiple de Solicitudes" || selectedTemplateId === "formato_multiple";
+      const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
+      const templateTypeId = selectedTemplate?.template_type_id || selectedTemplateId;
+      const isMulti = templateTypeId === "formato_multiple";
       if (isMulti) {
-        res = await api.generateMultiForm(token, {
-          employee_id: selectedEmployee.id,
+        res = await api.generateDocument(token, selectedEmployee.id, templateTypeId, {
+          template_record_id: selectedTemplate?.id,
+          title_override: selectedTemplate?.title,
+          body_override: selectedTemplate?.content,
+          footer_override: selectedTemplate?.footer,
+          include_logo: selectedTemplate?.include_logo,
           checked_options: checkedOptions,
           observaciones,
           fecha_solicitud: fechaSolicitud,
@@ -686,7 +1094,12 @@ function AppInner() {
         setCheckedOptions([]);
         setObservaciones("");
       } else {
-        res = await api.generateDocument(token, selectedEmployee.id, selectedTemplateId, { 
+        res = await api.generateDocument(token, selectedEmployee.id, templateTypeId, { 
+          template_record_id: selectedTemplate?.id,
+          title_override: selectedTemplate?.title,
+          body_override: selectedTemplate?.content,
+          footer_override: selectedTemplate?.footer,
+          include_logo: selectedTemplate?.include_logo,
           child_name: childName,
           incident_date: incidentDate,
           incident_time: incidentTime,
@@ -705,7 +1118,7 @@ function AppInner() {
       if (res && res.file_url) {
         const fullUrl = res.file_url.startsWith("http") 
           ? res.file_url 
-          : `${API_BASE}${res.file_url.startsWith('/') ? '' : '/'}${res.file_url}`;
+          : `${API_BASE.replace(/\/api$/, "")}${res.file_url.startsWith('/') ? '' : '/'}${res.file_url}`;
         
         const link = document.createElement("a");
         link.href = fullUrl;
@@ -734,18 +1147,66 @@ function AppInner() {
     const method = editingCompany ? "PUT" : "POST";
 
     try {
+      const companyPayload = editingCompany
+        ? newCompany
+        : { ...newCompany, departments: newCompanyDepartments.map((name) => name.trim()).filter(Boolean) };
       const res = await fetch(url, {
         method,
         headers: {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify(newCompany)
+        body: JSON.stringify(companyPayload)
       });
 
-      if (!res.ok) throw new Error("No se pudo procesar la solicitud de la empresa.");
+      const savedCompany = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(savedCompany.message || "No se pudo procesar la solicitud de la empresa.");
+
+      if (editingCompany) {
+        const companyId = savedCompany.id || editingCompany.id;
+        const previousDepartments = Array.isArray(editingCompany.departments) ? editingCompany.departments : [];
+        const nextDepartments = newCompanyDepartments.map((name) => name.trim()).filter(Boolean);
+        const normalizeDepartment = (name) => String(name || "").trim().toLocaleLowerCase("es-MX");
+        const nextDepartmentNames = new Set(nextDepartments.map(normalizeDepartment));
+        const previousDepartmentNames = new Set(previousDepartments.map((item) => normalizeDepartment(typeof item === "string" ? item : item.name)));
+
+        for (const department of previousDepartments) {
+          const departmentName = typeof department === "string" ? department : department.name;
+          if (department.id && !nextDepartmentNames.has(normalizeDepartment(departmentName))) {
+            const deleteResponse = await fetch(`${API_BASE}/companies/departments/${encodeURIComponent(department.id)}`, {
+              method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!deleteResponse.ok) throw new Error(`No se pudo quitar el departamento ${departmentName}.`);
+          }
+        }
+
+        for (const departmentName of nextDepartments) {
+          if (previousDepartmentNames.has(normalizeDepartment(departmentName))) continue;
+          const departmentResponse = await fetch(`${API_BASE}/companies/${encodeURIComponent(companyId)}/departments`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+            body: JSON.stringify({ name: departmentName }),
+          });
+          const departmentResult = await departmentResponse.json().catch(() => ({}));
+          if (!departmentResponse.ok) throw new Error(departmentResult.message || `No se pudo agregar el departamento ${departmentName}.`);
+        }
+      }
+
+      if (companyLogoFile && (savedCompany.id || editingCompany?.id)) {
+        try {
+          const companyId = String(savedCompany.id || editingCompany.id);
+          const logoResult = await api.uploadCompanyDocumentLogo(token, companyId, companyLogoFile);
+          setCompanies((items) => items.map((company) => String(company.id) === companyId
+            ? { ...company, logo_data: logoResult?.logo_data || null }
+            : company));
+        } catch (logoError) {
+          alert(`La empresa y sus departamentos se guardaron, pero el logo no se pudo guardar: ${logoError.message}`);
+        }
+      }
 
       setNewCompany({ legal_name: "", rfc: "", address: "", imss_registry: "" });
+      setNewCompanyDepartments([""]);
+      setCompanyLogoFile(null);
       setEditingCompany(null);
       setShowAddCompany(false);
       await loadCompanies();
@@ -753,6 +1214,100 @@ function AppInner() {
       setCompanySaveError(err.message);
     } finally {
       setCompanySaving(false);
+    }
+  }
+
+  function openPositionProfile(companyId, profile = null) {
+    setPositionProfileError("");
+    setPositionProfileNotice("");
+    setPositionDescriptiveFile(null);
+    setPositionProfileDraft(profile ? {
+      id: profile.id,
+      company_id: companyId,
+      position: profile.position || "",
+      job_activities: profile.job_activities || "",
+      work_schedule: profile.work_schedule || "",
+      payroll_type: normalizePayrollType(profile.payroll_type),
+      pay_period_salary: profile.pay_period_salary ?? "",
+      base_daily_salary: profile.base_daily_salary ?? "",
+      sdi_salary: profile.sdi_salary ?? "",
+      descriptive_file_name: profile.descriptive_file_name || "",
+      descriptive_file_url: profile.descriptive_file_url || "",
+    } : {
+      id: null, company_id: companyId, position: "", job_activities: "", work_schedule: "",
+      payroll_type: "QUI", pay_period_salary: "", base_daily_salary: "", sdi_salary: "",
+      descriptive_file_name: "", descriptive_file_url: "",
+    });
+  }
+
+  async function saveCompanyPositionProfile(e) {
+    e.preventDefault();
+    if (!positionProfileDraft?.position?.trim()) {
+      setPositionProfileError("Escribe el nombre del puesto.");
+      return;
+    }
+    setPositionProfileSaving(true);
+    setPositionProfileError("");
+    try {
+      const response = await fetch(`${API_BASE}/employees/position-profiles`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          ...positionProfileDraft,
+          position: positionProfileDraft.position.trim(),
+          payroll_type: normalizePayrollType(positionProfileDraft.payroll_type),
+          pay_period_salary: positionProfileDraft.pay_period_salary === "" ? null : Number(positionProfileDraft.pay_period_salary),
+          base_daily_salary: positionProfileDraft.base_daily_salary === "" ? null : Number(positionProfileDraft.base_daily_salary),
+          sdi_salary: positionProfileDraft.sdi_salary === "" ? null : Number(positionProfileDraft.sdi_salary),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "No se pudo guardar el puesto.");
+      let savedProfile = data;
+      if (positionDescriptiveFile) {
+        const formData = new FormData();
+        formData.append("file", positionDescriptiveFile);
+        const uploadResponse = await fetch(`${API_BASE}/employees/position-profiles/${encodeURIComponent(data.id)}/descriptive-file`, {
+          method: "POST", headers: { Authorization: `Bearer ${token}` }, body: formData,
+        });
+        const uploadResult = await uploadResponse.json().catch(() => ({}));
+        if (!uploadResponse.ok) throw new Error(uploadResult.message || "El puesto se guardó, pero no se pudo procesar el descriptivo.");
+        savedProfile = uploadResult.profile;
+        setPositionProfileDraft(current => ({ ...current, id: savedProfile.id, job_activities: savedProfile.job_activities || current.job_activities, descriptive_file_name: savedProfile.descriptive_file_name, descriptive_file_url: savedProfile.descriptive_file_url }));
+        setPositionDescriptiveFile(null);
+        if (uploadResult.updated_employee_count) await loadEmployees();
+        const syncedCount = Number(uploadResult.updated_employee_count || 0);
+        setPositionProfileNotice(`${uploadResult.extraction_message || "Descriptivo cargado."}${syncedCount ? ` Se actualizaron las actividades de ${syncedCount} colaborador(es) con este puesto.` : ""}`);
+      }
+      setCompanyPositionProfiles(current => ({
+        ...current,
+        [positionProfileDraft.company_id]: [
+          ...(current[positionProfileDraft.company_id] || []).filter(item => item.id !== savedProfile.id && String(item.position).toLocaleLowerCase("es-MX") !== String(savedProfile.position).toLocaleLowerCase("es-MX")),
+          savedProfile,
+        ].sort((a, b) => a.position.localeCompare(b.position, "es-MX")),
+      }));
+      if (!positionDescriptiveFile) setPositionProfileDraft(null);
+    } catch (error) {
+      setPositionProfileError(error.message || "No se pudo guardar el puesto.");
+    } finally {
+      setPositionProfileSaving(false);
+    }
+  }
+
+  async function deleteCompanyPositionProfile(companyId, profile) {
+    if (!window.confirm(`¿Eliminar el puesto “${profile.position}” y su configuración de esta empresa?`)) return;
+    try {
+      const response = await fetch(`${API_BASE}/employees/position-profiles/${encodeURIComponent(profile.id)}`, {
+        method: "DELETE", headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.message || "No se pudo eliminar el puesto.");
+      setCompanyPositionProfiles(current => ({
+        ...current,
+        [companyId]: (current[companyId] || []).filter(item => item.id !== profile.id),
+      }));
+    } catch (error) {
+      alert(error.message || "No se pudo eliminar el puesto.");
     }
   }
 
@@ -775,7 +1330,7 @@ function AppInner() {
   }
 
   async function handleAddDept(companyId) {
-    const deptName = deptInputs[companyId];
+    const deptName = (deptInputs[companyId] || "").trim();
     if (!deptName || !deptName.trim()) return;
 
     try {
@@ -785,15 +1340,17 @@ function AppInner() {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${token}`
         },
-        body: JSON.stringify({ name: deptName.trim() })
+        body: JSON.stringify({ name: deptName })
       });
 
-      if (res.ok) {
-        setDeptInputs({ ...deptInputs, [companyId]: "" });
-        loadCompanies();
-      }
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.message || "No se pudo guardar el departamento.");
+
+      setDeptInputs((current) => ({ ...current, [companyId]: "" }));
+      await loadCompanies();
     } catch (err) {
       console.error("Error al agregar departamento:", err);
+      window.alert(err.message || "No se pudo guardar el departamento.");
     }
   }
 
@@ -825,11 +1382,13 @@ function AppInner() {
     }
     setUserSaving(true);
     setUserSaveError("");
+    setUserSaveNotice("");
     try {
-      await api.registerUser(token, newUser);
-      setLastCreatedPassword(newUser.password);
-      setNewUser({ email: "", password: "", role: "empleado" });
-      loadUsers();
+      const created = await api.registerUser(token, newUser);
+      setUserSaveNotice(created.message || "Cuenta creada. No se envió ningún correo.");
+      setLastCreatedPassword("");
+      setNewUser({ email: "", password: "", role: "empleado", display_name: "", department: "", position: "" });
+      await loadUsers();
     } catch (err) {
       setUserSaveError(err.message);
     } finally {
@@ -837,12 +1396,79 @@ function AppInner() {
     }
   }
 
-  async function changeUserRole(id, role) {
+  async function sendUserAccessEmail(account) {
+    if (!window.confirm(`Se enviará un nuevo acceso a ${account.email} y se solicitará cambiar la contraseña al entrar. ¿Continuar?`)) return;
+    setSendingAccessUserId(account.id);
+    setUserSaveNotice("");
+    setLastCreatedPassword("");
     try {
-      await api.updateUser(token, id, { role });
-      loadUsers();
+      const result = await api.sendUserAccessEmail(token, account.id);
+      setUserSaveNotice(result.message || "Correo enviado.");
+      if (!result.email_sent) setLastCreatedPassword(result.temporary_password || "");
+      await loadUsers();
     } catch (err) {
       alert(err.message);
+    } finally {
+      setSendingAccessUserId(null);
+    }
+  }
+
+  async function editUserChatProfile(account) {
+    const display_name = window.prompt("Nombre completo para el chat", account.display_name || "");
+    if (display_name === null) return;
+    const department = window.prompt("Departamento", account.department || "");
+    if (department === null) return;
+    const position = window.prompt("Puesto", account.position || "");
+    if (position === null) return;
+    try {
+      await api.updateUser(token, account.id, { display_name, department, position });
+      await loadUsers();
+      setUserSaveNotice(`Se actualizó el perfil de ${account.email}; aparecerá con estos datos en mensajería.`);
+    } catch (error) {
+      setUserSaveError(error.message || "No se pudo actualizar el perfil del usuario.");
+    }
+  }
+
+  async function submitFirstLoginPassword(e) {
+    e.preventDefault();
+    setFirstPasswordError("");
+    if (!currentPassword) { setFirstPasswordError("Escribe la contraseña temporal que recibiste por correo."); return; }
+    if (newPassword.length < 8) { setFirstPasswordError("La nueva contraseña debe tener al menos 8 caracteres."); return; }
+    if (newPassword !== confirmPassword) { setFirstPasswordError("Las contraseñas no coinciden."); return; }
+    setFirstPasswordSaving(true);
+    try {
+      await api.changeOwnPassword(token, currentPassword, newPassword);
+      const updatedUser = { ...user, must_change_password: false };
+      setUser(updatedUser);
+      localStorage.setItem("nucleo_rh_user", JSON.stringify(updatedUser));
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    } catch (err) {
+      setFirstPasswordError(err.message);
+    } finally {
+      setFirstPasswordSaving(false);
+    }
+  }
+
+  async function changeUserRole(id, role) {
+    const accountId = String(id);
+    const account = users.find(item => String(item.id) === accountId);
+    const nextRole = normalizeManagedUserRole(role);
+    if (!account || accountId === String(user?.id)) return;
+
+    setSavingUserRoleId(accountId);
+    setUsers(current => current.map(item => String(item.id) === accountId ? { ...item, role: nextRole } : item));
+    try {
+      const updated = await api.updateUser(token, id, { role: nextRole });
+      setUsers(current => current.map(item => String(item.id) === accountId
+        ? { ...item, ...updated, role: normalizeManagedUserRole(updated?.role || nextRole) }
+        : item));
+    } catch (err) {
+      setUsers(current => current.map(item => String(item.id) === accountId ? { ...item, role: account.role } : item));
+      alert(err.message);
+    } finally {
+      setSavingUserRoleId(null);
     }
   }
 
@@ -896,17 +1522,26 @@ function AppInner() {
         ...emptyEmployee(),
         ...employeeToEdit,
         birth_date: employeeToEdit.birth_date ? String(employeeToEdit.birth_date).slice(0, 10) : "",
-        hire_date: employeeToEdit.hire_date ? String(employeeToEdit.hire_date).slice(0, 10) : "",
+        hire_date: employeeToEdit.hire_date || employeeToEdit.start_date ? String(employeeToEdit.hire_date || employeeToEdit.start_date).slice(0, 10) : "",
+        recognized_seniority_date: employeeToEdit.recognized_seniority_date ? String(employeeToEdit.recognized_seniority_date).slice(0, 10) : "",
         termination_date: employeeToEdit.termination_date ? String(employeeToEdit.termination_date).slice(0, 10) : "",
         contract_start_date: employeeToEdit.contract_start_date ? String(employeeToEdit.contract_start_date).slice(0, 10) : "",
         contract_end_date: employeeToEdit.contract_end_date ? String(employeeToEdit.contract_end_date).slice(0, 10) : "",
         rehire_date: employeeToEdit.rehire_date ? String(employeeToEdit.rehire_date).slice(0, 10) : "",
         probation_end_date: employeeToEdit.probation_end_date ? String(employeeToEdit.probation_end_date).slice(0, 10) : "",
+        payroll_type: normalizePayrollType(employeeToEdit.payroll_type),
+        pay_period_salary: employeeToEdit.pay_period_salary !== null && employeeToEdit.pay_period_salary !== undefined && employeeToEdit.pay_period_salary !== ""
+          ? String(employeeToEdit.pay_period_salary)
+          : (Number(employeeToEdit.base_salary) || Number(employeeToEdit.base_daily_salary) * 30)
+            ? String(periodAmountFromMonthly(Number(employeeToEdit.base_salary) || Number(employeeToEdit.base_daily_salary) * 30, employeeToEdit.payroll_type)) : "",
         is_rehire: !!employeeToEdit.rehire_date,
       });
     } else {
       setEditingEmployeeId(null);
-      setNewEmployee(emptyEmployee());
+      setNewEmployee({
+        ...emptyEmployee(),
+        company_id: selectedCompanyFilter?.id || "",
+      });
     }
     setFormTab("personal");
     setSaveError("");
@@ -916,6 +1551,17 @@ function AppInner() {
   function updateField(key, value) {
     setNewEmployee(prev => {
       const updated = { ...prev, [key]: value };
+      if (key === "company_id" && String(prev.company_id || "") !== String(value || "")) {
+        updated.department = "";
+        updated.position = "";
+        updated.job_activities = "";
+        updated.work_schedule = "";
+        updated.payroll_type = "QUI";
+        updated.pay_period_salary = "";
+        updated.base_salary = "";
+        updated.base_daily_salary = "";
+        updated.sdi_salary = "";
+      }
       if (key === "same_as_personal_address" && value) {
         updated.fiscal_street = updated.street;
         updated.fiscal_exterior_number = updated.exterior_number;
@@ -925,10 +1571,48 @@ function AppInner() {
         updated.fiscal_municipality = updated.municipality;
         updated.fiscal_state = updated.state;
       }
+      if (key === "payroll_type") {
+        const currentType = normalizePayrollType(prev.payroll_type);
+        const selectedType = normalizePayrollType(value);
+        const currentAmount = prev.pay_period_salary !== "" && prev.pay_period_salary !== null && prev.pay_period_salary !== undefined
+          ? monthlyAmountFromPeriod(prev.pay_period_salary, currentType)
+          : Number(prev.base_salary) || Number(prev.base_daily_salary) * 30 || 0;
+        updated.payroll_type = selectedType;
+        updated.pay_period_salary = currentAmount ? String(periodAmountFromMonthly(currentAmount, selectedType)) : "";
+        if (selectedType === "DIA" && updated.pay_period_salary) updated.base_daily_salary = updated.pay_period_salary;
+      }
+      if (key === "pay_period_salary" && normalizePayrollType(prev.payroll_type) === "DIA") {
+        updated.base_daily_salary = value;
+      }
       return updated;
     });
   }
 
+  function applyPositionProfile(positionValue = newEmployee.position) {
+    const cleanPosition = String(positionValue || "").trim().toLocaleLowerCase("es-MX");
+    if (!cleanPosition) return;
+    const profile = positionProfiles.find(item => String(item.position || "").trim().toLocaleLowerCase("es-MX") === cleanPosition);
+    if (!profile) return;
+    setNewEmployee(prev => {
+      const payrollType = normalizePayrollType(profile.payroll_type);
+      const periodSalary = profile.pay_period_salary !== null && profile.pay_period_salary !== undefined
+        ? String(profile.pay_period_salary) : "";
+      return {
+        ...prev,
+        position: profile.position,
+        job_activities: profile.job_activities || "",
+        work_schedule: profile.work_schedule || "",
+        payroll_type: payrollType,
+        pay_period_salary: periodSalary,
+        base_salary: periodSalary ? String(monthlyAmountFromPeriod(periodSalary, payrollType)) : "",
+        base_daily_salary: profile.base_daily_salary !== null && profile.base_daily_salary !== undefined
+          ? String(profile.base_daily_salary) : (payrollType === "DIA" ? periodSalary : ""),
+        sdi_salary: profile.sdi_salary !== null && profile.sdi_salary !== undefined ? String(profile.sdi_salary) : "",
+      };
+    });
+  }
+
+  // 🟢 SANITIZACIÓN ANTES DE ENVIAR EMPLEADO A GUARDAR
   async function addEmployee(e) {
     e.preventDefault();
     if (!newEmployee.first_name || (!newEmployee.last_name && !newEmployee.last_name_paternal) || !newEmployee.hire_date) {
@@ -936,10 +1620,35 @@ function AppInner() {
       setSaveError("Nombre, apellido y fecha de alta son obligatorios.");
       return;
     }
+
+    const normalizedDates = {};
+    for (const [field, label] of Object.entries(employeeDateLabels)) {
+      const normalized = normalizeEmployeeDate(newEmployee[field]);
+      if (!normalized.valid) {
+        setSaveError(`${label}: selecciona una fecha válida antes de guardar.`);
+        return;
+      }
+      normalizedDates[field] = normalized.value;
+    }
+
     setSavingEmployee(true);
     setSaveError("");
     try {
-      const payload = { ...newEmployee };
+      const payload = {
+        ...newEmployee,
+        // Sanitizar cadenas vacías para evitar Errores 500 en Postgres
+        base_daily_salary: newEmployee.base_daily_salary ? parseFloat(newEmployee.base_daily_salary) : null,
+        sdi_salary: newEmployee.sdi_salary ? parseFloat(newEmployee.sdi_salary) : null,
+        base_salary: newEmployee.pay_period_salary !== ""
+          ? monthlyAmountFromPeriod(newEmployee.pay_period_salary, newEmployee.payroll_type)
+          : newEmployee.base_salary ? parseFloat(newEmployee.base_salary) : null,
+        pay_period_salary: newEmployee.pay_period_salary !== "" ? parseFloat(newEmployee.pay_period_salary) : null,
+        infonavit_discount_value: newEmployee.infonavit_discount_value ? parseFloat(newEmployee.infonavit_discount_value) : null,
+        company_id: newEmployee.company_id && newEmployee.company_id !== "" ? newEmployee.company_id : null,
+        manager_id: newEmployee.manager_id && newEmployee.manager_id !== "" ? newEmployee.manager_id : null,
+        ...normalizedDates,
+      };
+
       delete payload.is_rehire;
       delete payload.id;
       if (!payload.rehire_date) delete payload.rehire_date;
@@ -950,12 +1659,25 @@ function AppInner() {
         delete payload.termination_date;
       }
 
+      const ensureDatesPersisted = (savedEmployee) => {
+        const dateWasNotSaved = Object.keys(employeeDateLabels).find(field => {
+          const savedDate = normalizeEmployeeDate(savedEmployee?.[field]);
+          return !savedDate?.valid || savedDate.value !== (payload[field] ?? null);
+        });
+        if (dateWasNotSaved) {
+          throw new Error(`${employeeDateLabels[dateWasNotSaved]} no se confirmó en el servidor. Revisa la fecha e intenta guardar de nuevo.`);
+        }
+      };
+
       if (editingEmployeeId) {
-        await api.updateEmployee(token, editingEmployeeId, payload);
+        const savedEmployee = await api.updateEmployee(token, editingEmployeeId, payload);
+        ensureDatesPersisted(savedEmployee);
         const refreshed = await api.getEmployee(token, editingEmployeeId);
+        ensureDatesPersisted(refreshed);
         setSelectedEmployee(refreshed);
       } else {
-        await api.createEmployee(token, payload);
+        const createdEmployee = await api.createEmployee(token, payload);
+        ensureDatesPersisted(createdEmployee);
       }
       setShowAddEmployee(false);
       setEditingEmployeeId(null);
@@ -968,7 +1690,17 @@ function AppInner() {
   }
 
   async function exportBajasToExcel() {
-    const bajasList = employees.filter(e => e.employment_status === "baja");
+    let bajasList = employees.filter(e => e.employment_status === "baja");
+
+    if (exportFilterType === "company") {
+      if (!exportSelectedCompanyId) { alert("Selecciona una empresa para exportar."); return; }
+      bajasList = bajasList.filter(e => isSameCompany(e, exportSelectedCompanyId));
+    } else if (exportFilterType === "employee") {
+      if (!exportSelectedEmployeeId) { alert("Selecciona un empleado para exportar."); return; }
+      bajasList = bajasList.filter(e => String(e.id) === String(exportSelectedEmployeeId));
+    }
+    bajasList = applyExtraExportFilters(bajasList);
+
     if (bajasList.length === 0) {
       alert("No hay registros de bajas para exportar.");
       return;
@@ -997,7 +1729,7 @@ function AppInner() {
       const motherLastName = e.mother_last_name || e.maternal_surname || "";
       const firstName = e.first_name || e.names || "";
 
-      const fullNameByLastNames = `${lastName} ${motherLastName} ${firstName}`.trim().toUpperCase() || "SIN NOMBRE";
+      const fullNameByLastNames = `${lastName} ${motherLastName} ${firstName}`.trim().toLocaleUpperCase("es-MX") || "SIN NOMBRE";
       const dischargeDate = e.termination_date || e.discharge_date ? String(e.termination_date || e.discharge_date).slice(0, 10) : "N/A";
 
       const row = worksheet.addRow([
@@ -1017,14 +1749,7 @@ function AppInner() {
       });
     });
 
-    worksheet.columns.forEach((column) => {
-      let maxLen = 0;
-      column.eachCell({ includeEmpty: true }, (cell) => {
-        const val = cell.value ? String(cell.value) : "";
-        if (val.length > maxLen) maxLen = val.length;
-      });
-      column.width = Math.max(maxLen + 4, 15);
-    });
+    applyReadableWorksheetLayout(worksheet, { minWidth: 15, maxWidth: 40, baseRowHeight: 22 });
 
     const buffer = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
@@ -1034,6 +1759,7 @@ function AppInner() {
     anchor.download = `Reporte_Bajas_RH_${new Date().toISOString().slice(0, 10)}.xlsx`;
     anchor.click();
     window.URL.revokeObjectURL(url);
+    setShowAddExportAltasModal(false);
   }
 
   async function processExportAltasExcel() {
@@ -1046,11 +1772,67 @@ function AppInner() {
       if (!exportSelectedEmployeeId) { alert("Selecciona un empleado para exportar."); return; }
       activeList = activeList.filter(e => String(e.id) === String(exportSelectedEmployeeId));
     }
+    activeList = applyExtraExportFilters(activeList);
 
     if (activeList.length === 0) {
       alert("No se encontraron colaboradores que coincidan con la selección.");
       return;
     }
+
+    const companyIds = [...new Set(activeList.map(e => e.company_id ?? e.companyId).filter(Boolean).map(String))];
+    const profilesByCompany = { ...companyPositionProfiles };
+    await Promise.all(companyIds.map(async companyId => {
+      try {
+        const response = await fetch(`${API_BASE}/employees/position-profiles?company_id=${encodeURIComponent(companyId)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (response.ok) {
+          const profiles = await response.json();
+          profilesByCompany[companyId] = Array.isArray(profiles) ? profiles : [];
+        }
+      } catch (error) {
+        console.warn(`No se pudieron cargar los puestos de la empresa ${companyId}:`, error);
+      }
+    }));
+
+    const getEmployeeProfile = (employee) => {
+      const companyId = String(employee.company_id ?? employee.companyId ?? "");
+      const profiles = profilesByCompany[companyId] || [];
+      const position = String(employee.position || employee.job_position || "").trim().toLocaleLowerCase("es-MX");
+      return profiles.find(profile => String(profile.position || "").trim().toLocaleLowerCase("es-MX") === position) || null;
+    };
+    const getBaseDailySalary = (employee, profile) => {
+      const employeeDaily = Number(employee.base_daily_salary);
+      if (Number.isFinite(employeeDaily) && employeeDaily > 0) return employeeDaily;
+      const profileDaily = Number(profile?.base_daily_salary);
+      if (Number.isFinite(profileDaily) && profileDaily > 0) return profileDaily;
+      const monthlySalary = Number(employee.base_salary);
+      if (Number.isFinite(monthlySalary) && monthlySalary > 0) return Number((monthlySalary / 30).toFixed(2));
+      const periodSalary = Number(profile?.pay_period_salary ?? employee.pay_period_salary);
+      if (Number.isFinite(periodSalary) && periodSalary > 0) {
+        const payrollType = profile?.payroll_type || employee.payroll_type;
+        return Number((monthlyAmountFromPeriod(periodSalary, payrollType) / 30).toFixed(2));
+      }
+      return "";
+    };
+    const getIntegratedDailySalary = (employee, profile) => {
+      const employeeIntegrated = Number(employee.sdi_salary);
+      if (Number.isFinite(employeeIntegrated) && employeeIntegrated > 0) return employeeIntegrated;
+      const profileIntegrated = Number(profile?.sdi_salary);
+      if (Number.isFinite(profileIntegrated) && profileIntegrated > 0) return profileIntegrated;
+      return "";
+    };
+    const downloadExcel = (buffer, filename) => {
+      const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => window.URL.revokeObjectURL(url), 1500);
+    };
 
     const workbook = new Workbook.Workbook();
     const worksheet = workbook.addWorksheet("Layout Altas");
@@ -1098,6 +1880,9 @@ function AppInner() {
     activeList.forEach((e, idx) => {
       const comp = companies.find(c => isSameCompany(e, c.id));
       const companyName = comp ? comp.legal_name : (e.company_name || "");
+      const profile = getEmployeeProfile(e);
+      const position = e.position || e.job_position || profile?.position || "";
+      const payrollType = e.payroll_type || profile?.payroll_type || "QUI";
       const cleanRfc = (e.rfc || "").replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
 
       const streetUse = e.fiscal_street || e.street || "";
@@ -1111,15 +1896,15 @@ function AppInner() {
       const rowData = [
         companyName,
         e.nss || "",
-        e.first_name || "",
-        e.last_name_paternal || e.last_name || "",
-        e.last_name_maternal || "",
+        String(e.first_name || "").toLocaleUpperCase("es-MX"),
+        String(e.last_name_paternal || e.last_name || "").toLocaleUpperCase("es-MX"),
+        String(e.last_name_maternal || "").toLocaleUpperCase("es-MX"),
         e.curp || "",
-        e.base_daily_salary ? Number(e.base_daily_salary) : "",
-        e.sdi_salary ? Number(e.sdi_salary) : "",
+        getBaseDailySalary(e, profile),
+        e.sdi_salary ? Number(e.sdi_salary) : (profile?.sdi_salary ? Number(profile.sdi_salary) : ""),
         formatDate(e.hire_date),
         e.department || "",
-        e.position || "",
+        position,
         cleanRfc,
         formatDate(e.birth_date),
         e.birth_place_municipality || "",
@@ -1140,7 +1925,7 @@ function AppInner() {
         e.emergency_contact_name || "",
         e.emergency_contact_relationship || "",
         e.emergency_contact_phone || "",
-        e.payroll_type || "QUI",
+        payrollType,
         e.has_infonavit_credit || "NO",
         e.infonavit_credit_number || "",
         e.infonavit_discount_value ? Number(e.infonavit_discount_value) : "",
@@ -1154,7 +1939,7 @@ function AppInner() {
       ];
 
       const addedRow = worksheet.addRow(rowData);
-      addedRow.height = 20;
+      addedRow.height = 22;
 
       const isEven = idx % 2 === 0;
       addedRow.eachCell((cell) => {
@@ -1164,7 +1949,7 @@ function AppInner() {
           fgColor: { argb: isEven ? 'FFFFFF' : 'F9FBF9' }
         };
         cell.font = { size: 9, name: 'Calibri' };
-        cell.alignment = { vertical: 'middle', horizontal: 'left' };
+        cell.alignment = { vertical: 'top', horizontal: 'left', wrapText: true };
         cell.border = {
           top: { style: 'thin', color: { argb: 'E1E6E4' } },
           left: { style: 'thin', color: { argb: 'E1E6E4' } },
@@ -1174,23 +1959,53 @@ function AppInner() {
       });
     });
 
-    worksheet.columns.forEach((column) => {
-      let maxLen = 0;
-      column.eachCell({ includeEmpty: true }, (cell) => {
-        const val = cell.value ? String(cell.value) : "";
-        if (val.length > maxLen) maxLen = val.length;
-      });
-      column.width = Math.max(maxLen + 4, 14);
-    });
+    applyReadableWorksheetLayout(worksheet, { minWidth: 12, maxWidth: 34, baseRowHeight: 22 });
 
-    const buffer = await workbook.xlsx.writeBuffer();
-    const blob = new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" });
-    const url = window.URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `Formatos_Altas_RH_${new Date().toISOString().slice(0, 10)}.xlsx`;
-    anchor.click();
-    window.URL.revokeObjectURL(url);
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    const mainBuffer = await workbook.xlsx.writeBuffer();
+
+    const templateResponse = await fetch("/templates/formato-alta-complemento.xlsx");
+    if (!templateResponse.ok) {
+      alert("No se encontró la plantilla de Complemento de altas. Vuelve a cargar la página o contacta a soporte.");
+      return;
+    }
+    const complementWorkbook = new Workbook.Workbook();
+    await complementWorkbook.xlsx.load(await templateResponse.arrayBuffer());
+    const complementSheet = complementWorkbook.getWorksheet("Hoja1") || complementWorkbook.worksheets[0];
+    if (!complementSheet) {
+      alert("La plantilla de Complemento de altas no contiene una hoja válida.");
+      return;
+    }
+    activeList.forEach((employee, index) => {
+      const profile = getEmployeeProfile(employee);
+      const company = companies.find(c => isSameCompany(employee, c.id));
+      const employeeName = [employee.last_name_paternal || employee.last_name, employee.last_name_maternal, employee.first_name]
+        .filter(Boolean).map(part => String(part).trim()).filter(Boolean).join(" ").toLocaleUpperCase("es-MX");
+      const values = [
+        "ALTA",
+        formatDate(employee.hire_date),
+        company?.legal_name || employee.company_name || "",
+        getIntegratedDailySalary(employee, profile),
+        employeeName,
+        employee.nss || "",
+        employee.rfc || "",
+        employee.curp || "",
+        "CHUCHO",
+      ];
+      const row = complementSheet.getRow(index + 2);
+      for (let column = 1; column <= values.length; column += 1) {
+        const cell = row.getCell(column);
+        const templateCell = complementSheet.getRow(2).getCell(column);
+        if (index > 0 && templateCell.style) cell.style = { ...templateCell.style };
+        cell.value = values[column - 1];
+      }
+      row.commit?.();
+    });
+    applyReadableWorksheetLayout(complementSheet, { minWidth: 12, maxWidth: 40, baseRowHeight: 22 });
+    const complementBuffer = await complementWorkbook.xlsx.writeBuffer();
+
+    downloadExcel(mainBuffer, `Formatos_Altas_RH_${dateStamp}.xlsx`);
+    window.setTimeout(() => downloadExcel(complementBuffer, `Complemento_de_Altas_RH_${dateStamp}.xlsx`), 250);
     setShowAddExportAltasModal(false);
   }
 
@@ -1205,7 +2020,7 @@ function AppInner() {
 
   if (resetToken) {
     return (
-      <div className="min-h-screen w-full flex items-center justify-center p-6" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
+      <div className="min-h-screen w-full flex items-center justify-center p-6" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }} translate="no" lang="es">
         <div className="w-full max-w-sm">
           <div className="flex items-center gap-2 mb-8 justify-center">
             <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background: C.primary }}><Building2 size={18} color="#fff" /></div>
@@ -1238,9 +2053,33 @@ function AppInner() {
     );
   }
 
+  if (token && user?.must_change_password) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50" lang="es">
+        <div className="w-full max-w-md rounded-2xl p-7 bg-white border shadow-sm" style={{ borderColor: C.line }}>
+          <div className="flex items-center gap-2 mb-6">
+            <div className="w-9 h-9 rounded-lg flex items-center justify-center" style={{ background: C.primary }}><Building2 size={18} color="#fff" /></div>
+            <span className="text-lg font-semibold" style={{ color: C.ink }}>Núcleo RH</span>
+          </div>
+          <h1 className="text-xl font-semibold mb-2" style={{ color: C.ink }}>Cambia tu contraseña temporal</h1>
+          <p className="text-sm mb-5" style={{ color: C.inkSoft }}>Para proteger tu cuenta, crea una contraseña personal antes de continuar.</p>
+          <form onSubmit={submitFirstLoginPassword} className="space-y-4">
+            <TextField label="Contraseña temporal recibida por correo" type="password" required value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} />
+            <TextField label="Nueva contraseña" type="password" required value={newPassword} onChange={event => setNewPassword(event.target.value)} placeholder="Mínimo 8 caracteres" />
+            <TextField label="Confirmar nueva contraseña" type="password" required value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} />
+            {firstPasswordError && <p className="text-xs" style={{ color: C.danger }}>{firstPasswordError}</p>}
+            <button type="submit" disabled={firstPasswordSaving} className="w-full py-2.5 rounded-lg text-sm font-medium flex items-center justify-center gap-2 text-white disabled:opacity-60" style={{ background: C.primary }}>
+              {firstPasswordSaving && <Loader2 size={14} className="animate-spin" />} Guardar y entrar
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
   if (!token || !user) {
     return (
-      <div className="min-h-screen w-full flex bg-[#0F172A] font-sans overflow-hidden">
+      <div className="min-h-screen w-full flex bg-[#0F172A] font-sans overflow-hidden notranslate" translate="no" lang="es">
         <div className="hidden lg:flex lg:w-3/5 relative overflow-hidden bg-slate-950 justify-between flex-col p-12">
           {LOGIN_SLIDES.map((slide, index) => {
             const isActive = index === currentSlide;
@@ -1416,21 +2255,59 @@ function AppInner() {
   const NAV = [
     { key: "dashboard", label: "Panel", icon: LayoutDashboard },
     { key: "messages", label: "Mensajería", icon: MessageSquare },
-    ...((isAdmin || canAccessSocial) ? [{ key: "social", label: "Publicaciones", icon: Share2 }] : []),
-    ...((isAdmin || canAccessSocial) ? [{ key: "ats", label: "Reclutamiento", icon: Briefcase }] : []),
+    ...((hasFullMenuAccess || canAccessSocial) ? [{ key: "social", label: "Publicaciones", icon: Share2 }] : []),
+    ...((hasFullMenuAccess || canAccessSocial) ? [{ key: "ats", label: "Reclutamiento", icon: Briefcase }] : []),
+    { key: "internal-jobs", label: "Vacantes internas", icon: Briefcase },
     { key: "profile", label: "Mi Perfil", icon: User },
-    ...(isAdmin ? [{ key: "employees", label: "Empleados", icon: Users }] : []),
+    ...(hasFullMenuAccess ? [{ key: "employees", label: "Empleados", icon: Users }] : []),
     { key: "orgchart", label: "Organigrama", icon: Building2 },
     { key: "leave", label: "Vacaciones y permisos", icon: CalendarDays },
-    ...(isAdmin ? [{ key: "users", label: "Usuarios", icon: KeyRound }] : []),
-    ...(isAdmin ? [{ key: "companies", label: "Empresas", icon: Building2 }] : []),
+    ...(canManageUsers ? [{ key: "users", label: "Usuarios", icon: KeyRound }] : []),
+    ...(hasFullMenuAccess ? [{ key: "companies", label: "Empresas", icon: Building2 }] : []),
   ];
 
   const pendingCount = leaveRequests.filter(r => r.status === "pendiente").length;
+  const batchSelectedCompany = companies.find(company => String(company.id) === String(batchCompanyId)) || null;
+  const batchAvailableTemplates = Array.isArray(batchSelectedCompany?.templates) ? batchSelectedCompany.templates : [];
+  const batchTemplateTypes = [...new Set(batchAvailableTemplates.map(template => template.document_type).filter(Boolean))];
+  const batchTemplateTypeOptions = [...new Set([...COMPANY_TEMPLATE_DOCUMENT_TYPES, ...batchTemplateTypes])];
+  const batchSubtypes = [...new Set(batchAvailableTemplates
+    .filter(template => template.document_type === batchDocType)
+    .map(template => template.sub_type || "General"))];
+  const batchCompanyDepartments = [...new Set((batchSelectedCompany?.departments || [])
+    .map(department => typeof department === "string" ? department : department?.name)
+    .map(name => String(name || "").trim())
+    .filter(Boolean))];
+
+  const selectedAppearanceTheme = APPEARANCE_THEMES.find(theme => theme.id === appearance.themeId) || APPEARANCE_THEMES[0];
+  const safeAppearanceImage = (() => {
+    const image = String(appearance.backgroundImage || "");
+    if (/^data:image\/(webp|jpeg|png);base64,[A-Za-z0-9+/]+=*$/.test(image)) return image;
+    try {
+      const parsed = new URL(image);
+      return parsed.protocol === "https:" && !parsed.username && !parsed.password ? parsed.href : "";
+    } catch (_error) {
+      return "";
+    }
+  })();
+  const appBackground = safeAppearanceImage
+    // Keep the selected wallpaper visible without letting it compete with text.
+    ? `linear-gradient(rgba(243,245,244,0.35), rgba(243,245,244,0.35)), url("${safeAppearanceImage}")`
+    : selectedAppearanceTheme.background;
+  const appearancePalettes = {
+    green: { primary: "#1B4B43", soft: "#E7EFEC" },
+    blue: { primary: "#2457A6", soft: "#E8F0FE" },
+    violet: { primary: "#7042A5", soft: "#F1EAFE" },
+    coral: { primary: "#B94B54", soft: "#FCEBED" },
+    amber: { primary: "#9A5B12", soft: "#FFF2D9" },
+  };
+  const accentPalette = appearancePalettes[appearance.accentColor] || appearancePalettes.green;
+  const fontFamilies = { inter: "Inter, sans-serif", arial: "Arial, sans-serif", georgia: "Georgia, serif", trebuchet: "'Trebuchet MS', sans-serif" };
+  const fontFamily = fontFamilies[appearance.fontFamily] || fontFamilies.inter;
 
   return (
-    <div className="min-h-screen w-full flex" style={{ background: C.bg, fontFamily: "Inter, sans-serif" }}>
-      <aside className="w-60 shrink-0 flex flex-col p-4" style={{ borderRight: `1px solid ${C.line}` }}>
+  <div id="app-shell" data-icon-shape={appearance.iconShape || "rounded"} className="min-h-screen w-full flex notranslate" style={{ "--user-primary": accentPalette.primary, "--user-primary-soft": accentPalette.soft, "--user-font-family": fontFamily, background: appBackground, backgroundAttachment: "fixed", backgroundSize: "cover", backgroundPosition: "center", fontFamily }} translate="no" lang="es">
+      <aside className="w-60 shrink-0 flex flex-col p-4" style={{ borderRight: `1px solid ${C.line}`, background: "rgba(255,255,255,0.98)" }}>
         <div className="flex items-center gap-2 px-2 mb-8">
           <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: C.primary }}><Building2 size={16} color="#fff" /></div>
           <span className="font-semibold" style={{ color: C.ink }}>Núcleo RH</span>
@@ -1448,7 +2325,7 @@ function AppInner() {
                     {unreadCount}
                   </span>
                 )}
-                {item.key === "leave" && isAdmin && pendingCount > 0 && (
+                {item.key === "leave" && hasFullMenuAccess && pendingCount > 0 && (
                   <span className="ml-auto text-[10px] font-semibold px-1.5 py-0.5 rounded-full" style={{ background: C.accent, color: "#fff" }}>{pendingCount}</span>
                 )}
               </button>
@@ -1460,7 +2337,7 @@ function AppInner() {
             <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold shrink-0" style={{ background: C.primary, color: "#fff" }}>{initials(user.email)}</div>
             <div className="min-w-0">
               <p className="text-sm font-medium truncate" style={{ color: C.ink }}>{user.email}</p>
-              <p className="text-xs truncate" style={{ color: C.inkSoft }}>{isAdmin ? "Administrador" : "Empleado"}</p>
+              <p className="text-xs truncate" style={{ color: C.inkSoft }}>{isAdmin ? "Administrador" : isRecruitmentManager ? "Reclutamiento" : isHumanResources ? "Recursos Humanos" : "Empleado"}</p>
             </div>
           </div>
           <button onClick={handleLogout} className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm cursor-pointer" style={{ color: C.inkSoft }}><LogOut size={15} /> Cerrar sesión</button>
@@ -1473,37 +2350,48 @@ function AppInner() {
             token={token} 
             user={user} 
             api={api} 
+            appearance={appearance}
+            onSaveAppearance={saveAppearance}
+            appearanceSaving={appearanceSaving}
+            appearanceSaved={appearanceSaved}
+            appearanceError={appearanceError}
             onNavigate={(targetView) => setView(targetView)} 
           />
         )}
 
-        {view === "social" && (
+        {view === "social" && (hasFullMenuAccess || canAccessSocial) && (
           <SocialPublicationsModule token={token} user={user} api={api} />
         )}
 
-        {view === "ats" && (isAdmin || canAccessSocial) && (
+        {view === "ats" && (hasFullMenuAccess || canAccessSocial) && (
           <RecruitmentModule token={token} companies={companies} api={api} />
         )}
 
+        {view === "internal-jobs" && (
+          <InternalVacanciesPortal token={token} user={user} api={api} />
+        )}
+
         {view === "messages" && (
-          <ChatModule token={token} user={user} api={api} />
+          <ChatModule token={token} user={user} api={api} unreadBySender={unreadBySender} />
         )}
 
         {view === "profile" && (
           <UserProfileView token={token} user={user} api={api} employees={employees} />
         )}
 
-        {view === "companies" && isAdmin && (
+        {view === "companies" && hasFullMenuAccess && (
           <div>
             <div className="flex items-center justify-between mb-6">
-              <div>
+              <div className="rounded-xl border border-white/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-sm">
                 <h1 className="text-2xl font-semibold mb-1" style={{ color: C.ink }}>Empresas</h1>
-                <p className="text-sm" style={{ color: C.inkSoft }}>Gestión de razón social, entidades y departamentos ({companies.length})</p>
+                <p className="text-sm" style={{ color: C.inkSoft }}>Catálogo corporativo de empresas, estructura organizacional y formatos ({companies.length})</p>
               </div>
               <button 
                 onClick={() => { 
                   setEditingCompany(null);
                   setNewCompany({ legal_name: "", rfc: "", address: "", imss_registry: "" });
+                  setNewCompanyDepartments([""]);
+                  setCompanyLogoFile(null);
                   setShowAddCompany(v => !v); 
                   setCompanySaveError(""); 
                 }}
@@ -1515,7 +2403,7 @@ function AppInner() {
             </div>
 
             {showAddCompany && (
-              <form onSubmit={submitNewCompany} className="rounded-2xl p-5 mb-6 bg-white border shadow-sm" style={{ borderColor: C.line }}>
+              <form ref={companyFormRef} onSubmit={submitNewCompany} className="rounded-2xl p-5 mb-6 bg-white border shadow-sm scroll-mt-6" style={{ borderColor: C.line }}>
                 <h2 className="text-sm font-bold mb-4" style={{ color: C.ink }}>
                   {editingCompany ? "Editar Razón Social" : "Registrar Nueva Razón Social"}
                 </h2>
@@ -1546,11 +2434,46 @@ function AppInner() {
                     placeholder="Calle, Número, Ciudad" 
                   />
                 </div>
+                <div className="mt-5 grid gap-5 border-t pt-4 md:grid-cols-2" style={{ borderColor: C.line }}>
+                    <div>
+                      <div className="mb-2 flex items-center justify-between gap-3">
+                        <label className="text-xs font-semibold" style={{ color: C.ink }}>{editingCompany ? "Departamentos de la empresa" : "Departamentos iniciales"}</label>
+                        <button type="button" onClick={() => setNewCompanyDepartments((items) => [...items, ""])} className="text-xs font-semibold" style={{ color: C.primary }}>+ Agregar departamento</button>
+                      </div>
+                      <div className="space-y-2">
+                        {newCompanyDepartments.map((department, index) => (
+                          <div key={index} className="flex gap-2">
+                            <input value={department} onChange={(e) => setNewCompanyDepartments((items) => items.map((item, i) => i === index ? e.target.value : item))} placeholder={`Departamento ${index + 1}`} className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:border-[#1B4B43]" style={{ borderColor: C.line }} />
+                            {newCompanyDepartments.length > 1 && <button type="button" onClick={() => setNewCompanyDepartments((items) => items.filter((_, i) => i !== index))} className="rounded-lg px-2 text-xs text-red-600 hover:bg-red-50" aria-label={`Quitar departamento ${index + 1}`}>Quitar</button>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs font-semibold block mb-2" style={{ color: C.ink }}>Logo de la empresa <span className="font-normal" style={{ color: C.inkSoft }}>(opcional, PNG o JPG hasta 3 MB)</span></label>
+                      <input type="file" accept="image/png,image/jpeg" onChange={(e) => {
+                        const file = e.target.files?.[0] || null;
+                        if (file && !["image/png", "image/jpeg"].includes(file.type)) {
+                          setCompanySaveError("El logo debe ser una imagen PNG o JPG.");
+                          e.target.value = "";
+                          return;
+                        }
+                        if (file && file.size > 3 * 1024 * 1024) {
+                          setCompanySaveError("El logo no debe superar 3 MB.");
+                          e.target.value = "";
+                          return;
+                        }
+                        setCompanyLogoFile(file);
+                        setCompanySaveError("");
+                      }} className="block w-full rounded-lg border bg-white px-3 py-2 text-xs" style={{ borderColor: C.line }} />
+                      {companyLogoFile && <p className="mt-2 truncate text-[11px]" style={{ color: C.inkSoft }}>Logo seleccionado: {companyLogoFile.name}</p>}
+                    </div>
+                  </div>
                 {companySaveError && <p className="text-xs mt-3 font-medium" style={{ color: C.danger }}>{companySaveError}</p>}
                 <div className="flex justify-end gap-3 mt-4">
                   <button 
                     type="button" 
-                    onClick={() => { setShowAddCompany(false); setEditingCompany(null); }} 
+                    onClick={() => { setShowAddCompany(false); setEditingCompany(null); setNewCompanyDepartments([""]); setCompanyLogoFile(null); }} 
                     className="px-4 py-2 rounded-lg text-xs font-medium cursor-pointer" 
                     style={{ border: `1px solid ${C.line}`, color: C.inkSoft }}
                   >
@@ -1572,19 +2495,27 @@ function AppInner() {
             {companiesLoading ? <Spinner label="Cargando empresas y departamentos…" /> : (
               <div className="space-y-4">
                 {companies.map((c, i) => (
-                  <div key={c.id || i} className="rounded-2xl p-5 bg-white border shadow-sm space-y-4" style={{ borderColor: C.line }}>
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-xl flex items-center justify-center font-bold text-xs" style={{ background: C.primarySoft, color: C.primary }}>
-                          <Building2 size={20} />
+                  <div key={c.id || i} className="overflow-hidden rounded-2xl bg-white border shadow-sm" style={{ borderColor: expandedCompanyId === c.id ? C.primary : C.line }}>
+                    <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                      <button type="button" onClick={() => setExpandedCompanyId(current => current === c.id ? null : c.id)} className="flex min-w-0 flex-1 items-center gap-4 text-left">
+                        <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl border" style={{ background: C.primarySoft, color: C.primary, borderColor: C.line }}>
+                          {c.logo_data
+                            ? <img src={c.logo_data} alt={`Logo de ${c.legal_name || c.name}`} className="h-full w-full object-contain p-1" />
+                            : <Building2 size={24} />}
                         </div>
-                        <div>
-                          <p className="text-base font-bold" style={{ color: C.ink }}>{c.legal_name || c.name}</p>
-                          <p className="text-xs" style={{ color: C.inkSoft }}>RFC: {c.rfc || "—"} · Reg. Patronal: {c.imss_registry || c.registro_patronal || "—"} · {c.address || "Sin dirección física registrada"}</p>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-base font-bold" style={{ color: C.ink }}>{c.legal_name || c.name}</p>
+                          <p className="mt-0.5 truncate text-xs" style={{ color: C.inkSoft }}>RFC {c.rfc || "Sin registrar"} · Registro patronal {c.imss_registry || c.registro_patronal || "Sin registrar"}</p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: C.primarySoft, color: C.primary }}>{c.departments?.length || 0} departamentos</span>
+                            <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: "#F1F5F4", color: C.inkSoft }}>{companyPositionProfiles[c.id]?.length || 0} puestos</span>
+                            <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ background: "#F1F5F4", color: C.inkSoft }}>{c.templates?.length || 0} formatos</span>
+                          </div>
                         </div>
-                      </div>
+                        <ChevronRight size={18} className={`shrink-0 transition-transform ${expandedCompanyId === c.id ? "rotate-90" : ""}`} style={{ color: C.inkSoft }} />
+                      </button>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex shrink-0 items-center gap-2 pl-[4.5rem] sm:pl-0">
                         <button
                           type="button"
                           onClick={() => {
@@ -1595,6 +2526,8 @@ function AppInner() {
                               address: c.address || "",
                               imss_registry: c.imss_registry || c.registro_patronal || ""
                             });
+                            setNewCompanyDepartments(Array.isArray(c.departments) && c.departments.length ? c.departments.map((department) => typeof department === "string" ? department : department.name || "") : [""]);
+                            setCompanyLogoFile(null);
                             setShowAddCompany(true);
                           }}
                           className="px-3 py-1.5 text-xs font-semibold rounded-lg border flex items-center gap-1 transition-colors cursor-pointer"
@@ -1614,7 +2547,22 @@ function AppInner() {
                       </div>
                     </div>
 
-                    <div className="border-t pt-3" style={{ borderColor: C.line }}>
+                    {expandedCompanyId === c.id && <div className="border-t" style={{ borderColor: C.line, background: "#FCFDFC" }}>
+                    <div className="flex flex-wrap gap-1 border-b px-4 pt-3 sm:px-5" style={{ borderColor: C.line }}>
+                      {[
+                        ["info", "Resumen"], ["departments", "Departamentos"], ["positions", "Puestos"], ["templates", "Formatos"],
+                      ].map(([tab, label]) => (
+                        <button key={tab} type="button" onClick={() => setCompanySectionTabs(current => ({ ...current, [c.id]: tab }))} className="rounded-t-lg border-b-2 px-3 py-2 text-xs font-semibold transition-colors" style={{ borderColor: (companySectionTabs[c.id] || "info") === tab ? C.primary : "transparent", color: (companySectionTabs[c.id] || "info") === tab ? C.primary : C.inkSoft, background: (companySectionTabs[c.id] || "info") === tab ? "#FFFFFF" : "transparent" }}>{label}</button>
+                      ))}
+                    </div>
+                    <div className="p-4 sm:p-5">
+                    {(companySectionTabs[c.id] || "info") === "info" && <div className="grid gap-3 rounded-xl border bg-white p-4 sm:grid-cols-3" style={{ borderColor: C.line }}>
+                      <div><p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: C.inkSoft }}>Razón social</p><p className="mt-1 text-xs font-medium" style={{ color: C.ink }}>{c.legal_name || c.name || "—"}</p></div>
+                      <div><p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: C.inkSoft }}>RFC y registro patronal</p><p className="mt-1 text-xs font-medium" style={{ color: C.ink }}>{c.rfc || "—"} · {c.imss_registry || c.registro_patronal || "—"}</p></div>
+                      <div className="sm:col-span-1"><p className="text-[10px] font-bold uppercase tracking-wide" style={{ color: C.inkSoft }}>Domicilio</p><p className="mt-1 text-xs font-medium" style={{ color: C.ink }}>{c.address || "Sin dirección registrada"}</p></div>
+                    </div>}
+
+                    {(companySectionTabs[c.id] || "info") === "departments" && <div className="rounded-xl border bg-white p-4" style={{ borderColor: C.line }}>
                       <span className="text-xs font-bold block mb-2" style={{ color: C.inkSoft }}>
                         Departamentos asignados a esta empresa:
                       </span>
@@ -1659,20 +2607,76 @@ function AppInner() {
                           + Agregar
                         </button>
                       </div>
-                    </div>
+                    </div>}
 
-                    <div className="border-t pt-3 mt-3" style={{ borderColor: C.line }}>
+                    {(companySectionTabs[c.id] || "info") === "positions" && <div className="rounded-xl border bg-white p-4" style={{ borderColor: C.line }}>
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <div>
+                          <span className="text-xs font-bold block" style={{ color: C.primary }}>Puestos y condiciones por empresa</span>
+                          <span className="text-[11px]" style={{ color: C.inkSoft }}>Define aquí actividades, horario, salario y modalidad para reutilizarlos en expedientes.</span>
+                        </div>
+                        <button type="button" onClick={() => openPositionProfile(c.id)} className="shrink-0 rounded-lg px-3 py-2 text-xs font-semibold text-white" style={{ background: C.primary }}>+ Agregar puesto</button>
+                      </div>
+                      <div className="mb-3 space-y-2">
+                        {(companyPositionProfiles[c.id] || []).length ? companyPositionProfiles[c.id].map(profile => (
+                          <div key={profile.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-slate-50 px-3 py-2" style={{ borderColor: C.line }}>
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold" style={{ color: C.ink }}>{profile.position}</p>
+                              <p className="text-[11px]" style={{ color: C.inkSoft }}>{PAYROLL_OPTIONS.find(option => option.id === normalizePayrollType(profile.payroll_type))?.name || "Quincenal"} · {profile.pay_period_salary === null || profile.pay_period_salary === undefined ? "Salario sin definir" : `$${Number(profile.pay_period_salary).toLocaleString("es-MX")} por periodo`} · {profile.work_schedule || "Horario sin definir"}</p>
+                              <p className="truncate text-[11px]" style={{ color: C.inkSoft }}>{profile.job_activities || "Actividades sin definir"}</p>
+                              {profile.descriptive_file_url && <a href={`${API_BASE.replace(/\/api$/, "")}${profile.descriptive_file_url}`} target="_blank" rel="noreferrer" className="mt-1 inline-block text-[11px] font-semibold underline" style={{ color: C.primary }}>Ver descriptivo: {profile.descriptive_file_name || "archivo"}</a>}
+                            </div>
+                            <div className="flex gap-2">
+                              <button type="button" onClick={() => openPositionProfile(c.id, profile)} className="rounded-md border px-2 py-1 text-[11px] font-semibold" style={{ borderColor: C.line, color: C.primary }}>Editar</button>
+                              <button type="button" onClick={() => deleteCompanyPositionProfile(c.id, profile)} className="rounded-md px-2 py-1 text-[11px] font-semibold text-red-600">Eliminar</button>
+                            </div>
+                          </div>
+                        )) : <p className="text-xs italic text-slate-400">Aún no hay puestos definidos para esta empresa.</p>}
+                      </div>
+                      {positionProfileDraft?.company_id === c.id && (
+                        <form onSubmit={saveCompanyPositionProfile} className="space-y-3 rounded-xl border p-4" style={{ borderColor: C.line, background: "#FBFCFB" }}>
+                          <p className="text-xs font-bold" style={{ color: C.ink }}>{positionProfileDraft.id ? "Editar puesto" : "Nuevo puesto"}</p>
+                          <div className="grid gap-3 md:grid-cols-2">
+                            <TextField label="Puesto" required value={positionProfileDraft.position} onChange={e => setPositionProfileDraft(current => ({ ...current, position: e.target.value }))} placeholder="Ej. Oficial fierrero" />
+                            <TextField label="Horario laboral" value={positionProfileDraft.work_schedule} onChange={e => setPositionProfileDraft(current => ({ ...current, work_schedule: e.target.value }))} placeholder="Ej. Lunes a viernes, 08:00 a 17:00" />
+                            <TextField label="Modalidad de pago" value={positionProfileDraft.payroll_type} options={PAYROLL_OPTIONS} onChange={e => setPositionProfileDraft(current => ({ ...current, payroll_type: e.target.value }))} />
+                            <TextField label={`Salario ${PAYROLL_OPTIONS.find(option => option.id === normalizePayrollType(positionProfileDraft.payroll_type))?.name || "Quincenal"} (MXN)`} type="number" value={positionProfileDraft.pay_period_salary} onChange={e => setPositionProfileDraft(current => ({ ...current, pay_period_salary: e.target.value }))} />
+                            <TextField label="Salario diario integrado (opcional)" type="number" value={positionProfileDraft.sdi_salary} onChange={e => setPositionProfileDraft(current => ({ ...current, sdi_salary: e.target.value }))} />
+                            <TextField label="Salario diario base (opcional)" type="number" value={positionProfileDraft.base_daily_salary} onChange={e => setPositionProfileDraft(current => ({ ...current, base_daily_salary: e.target.value }))} />
+                            <div className="md:col-span-2">
+                              <label className="mb-1.5 block text-xs font-medium" style={{ color: C.inkSoft }}>Actividades del puesto</label>
+                              <textarea rows={3} value={positionProfileDraft.job_activities} onChange={e => setPositionProfileDraft(current => ({ ...current, job_activities: e.target.value }))} className="w-full rounded-lg border bg-white px-3 py-2.5 text-sm outline-none" style={{ borderColor: C.line }} placeholder="Describe las actividades y responsabilidades del puesto" />
+                            </div>
+                            <div className="md:col-span-2 rounded-lg border bg-white p-3" style={{ borderColor: C.line }}>
+                              <label className="mb-1.5 block text-xs font-semibold" style={{ color: C.ink }}>Descriptivo del puesto</label>
+                              <p className="mb-2 text-[11px]" style={{ color: C.inkSoft }}>Sube un PDF o archivo Word. Se intentará extraer la sección de actividades para rellenar el campo anterior.</p>
+                              <input type="file" accept=".pdf,.doc,.docx,.txt" onChange={event => { setPositionDescriptiveFile(event.target.files?.[0] || null); setPositionProfileNotice(""); }} className="block w-full text-xs" />
+                              {positionProfileDraft.descriptive_file_url && <p className="mt-2 text-[11px]" style={{ color: C.inkSoft }}>Archivo actual: <a href={`${API_BASE.replace(/\/api$/, "")}${positionProfileDraft.descriptive_file_url}`} target="_blank" rel="noreferrer" className="font-semibold underline" style={{ color: C.primary }}>{positionProfileDraft.descriptive_file_name || "Ver descriptivo"}</a></p>}
+                              {positionDescriptiveFile && <p className="mt-2 truncate text-[11px]" style={{ color: C.inkSoft }}>Nuevo archivo: {positionDescriptiveFile.name}</p>}
+                            </div>
+                          </div>
+                          {positionProfileError && <p className="text-xs" style={{ color: C.danger }}>{positionProfileError}</p>}
+                          {positionProfileNotice && <p className="rounded-lg p-2 text-xs" style={{ background: C.primarySoft, color: C.primary }}>{positionProfileNotice}</p>}
+                          <div className="flex justify-end gap-2">
+                            <button type="button" onClick={() => { setPositionProfileDraft(null); setPositionProfileError(""); setPositionProfileNotice(""); setPositionDescriptiveFile(null); }} className="rounded-lg border px-3 py-2 text-xs" style={{ borderColor: C.line, color: C.inkSoft }}>Cancelar</button>
+                            <button type="submit" disabled={positionProfileSaving} className="rounded-lg px-3 py-2 text-xs font-semibold text-white disabled:opacity-60" style={{ background: C.primary }}>{positionProfileSaving ? "Guardando…" : positionProfileNotice ? "Guardar actividades" : "Guardar puesto"}</button>
+                          </div>
+                        </form>
+                      )}
+                    </div>}
+
+                    {(companySectionTabs[c.id] || "info") === "templates" && <div className="rounded-xl border bg-white p-4" style={{ borderColor: C.line }}>
                       <span className="text-xs font-bold block mb-2" style={{ color: C.primary }}>
                         📄 Plantillas de Formatos para Generación de Expedientes:
                       </span>
+                      {c.templates_load_error && (
+                        <p className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+                          No se pudieron consultar las plantillas guardadas. {c.templates_load_error} Actualiza la pantalla o revisa la conexión con el servidor.
+                        </p>
+                      )}
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                        {[
-                          "Contratos",
-                          "Convenio de Confidencialidad",
-                          "Aviso de Privacidad",
-                          "Formatos Varios"
-                        ].map((docType) => {
+                        {[...new Set([...COMPANY_TEMPLATE_DOCUMENT_TYPES, ...(c.templates || []).map(template => template.document_type).filter(Boolean)])].map((docType) => {
                           const categoryTemplates = c.templates?.filter(t => t.document_type === docType || (docType === "Contratos" && (t.document_type === "Contratos" || t.document_type === "Contrato Firmado"))) || [];
 
                           return (
@@ -1771,7 +2775,63 @@ function AppInner() {
                           );
                         })}
                       </div>
+                      <div className="pt-3 border-t border-slate-200/60">
+                        <label className="text-xs font-bold block mb-2 text-slate-700">Agregar otro tipo de formato para esta empresa</label>
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={companyTemplateTypeDrafts[c.id] || ""}
+                            onChange={event => setCompanyTemplateTypeDrafts(current => ({ ...current, [c.id]: event.target.value }))}
+                            placeholder="Ej. Carta de autorización"
+                            className="min-w-0 flex-1 px-3 py-2 rounded-lg border bg-white text-xs outline-none focus:border-[#1B4B43]"
+                            style={{ borderColor: C.line }}
+                          />
+                          <label className="px-3 py-2 rounded-lg bg-[#1B4B43] text-white text-xs font-bold hover:opacity-90 cursor-pointer shrink-0">
+                            Subir .docx
+                            <input
+                              type="file"
+                              accept=".docx"
+                              className="hidden"
+                              onChange={async event => {
+                                const file = event.target.files?.[0];
+                                const docType = String(companyTemplateTypeDrafts[c.id] || "").trim();
+                                if (!file) return;
+                                if (!docType) {
+                                  alert("Escribe el tipo de formato antes de seleccionar la plantilla.");
+                                  event.target.value = "";
+                                  return;
+                                }
+                                const formData = new FormData();
+                                formData.append("template", file);
+                                formData.append("document_type", docType);
+                                formData.append("sub_type", "General");
+                                try {
+                                  const response = await fetch(`${API_BASE}/companies/${c.id}/upload-template`, {
+                                    method: "POST",
+                                    headers: { Authorization: `Bearer ${token}` },
+                                    body: formData,
+                                  });
+                                  if (!response.ok) {
+                                    const error = await response.json().catch(() => ({}));
+                                    throw new Error(error.message || "No se pudo guardar la plantilla.");
+                                  }
+                                  alert(`Plantilla de '${docType}' guardada. Ya aparecerá en Generación Masiva.`);
+                                  setCompanyTemplateTypeDrafts(current => ({ ...current, [c.id]: "" }));
+                                  await loadCompanies();
+                                } catch (error) {
+                                  alert("Error al subir la plantilla: " + error.message);
+                                } finally {
+                                  event.target.value = "";
+                                }
+                              }}
+                            />
+                          </label>
+                        </div>
+                        <p className="mt-1 text-[10px] text-slate-500">Los tipos personalizados se agregan automáticamente a la lista de generación masiva de esta empresa.</p>
+                      </div>
+                    </div>}
                     </div>
+                    </div>}
                   </div>
                 ))}
                 {companies.length === 0 && (
@@ -1787,22 +2847,22 @@ function AppInner() {
         {view === "orgchart" && (
           <div className="space-y-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
+              <div className="rounded-xl border border-white/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-sm">
                 <h1 className="text-2xl font-semibold mb-1" style={{ color: C.ink }}>
-                  {isAdmin 
+                  {hasFullMenuAccess
                     ? "Organigrama por Empresa" 
                     : `Organigrama de Departamento: ${userDept}`}
                 </h1>
                 <p className="text-sm" style={{ color: C.inkSoft }}>
-                  {isAdmin 
+                  {hasFullMenuAccess
                     ? "Estructura jerárquica organizada individualmente por Razón Social." 
                     : "Estructura interna y puestos activos asignados a tu departamento."}
                 </p>
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
-                {isAdmin && companies.length > 0 && (
-                  <div className="flex items-center gap-2">
+                {hasFullMenuAccess && companies.length > 0 && (
+                  <div className="inline-flex items-center gap-2 rounded-xl border border-white/80 bg-white/90 px-3 py-2 shadow-sm backdrop-blur-sm">
                     <span className="text-xs font-bold text-slate-500 uppercase shrink-0">Empresa:</span>
                     <select
                       value={selectedCompanyFilter?.id || "all"}
@@ -1945,7 +3005,7 @@ function AppInner() {
                 employees={
                   employees
                     .filter(e => e.employment_status === "activo")
-                    .filter(e => isAdmin || (userDept && e.department === userDept))
+                    .filter(e => hasFullMenuAccess || (userDept && e.department === userDept))
                     .filter(e => {
                       if (!selectedCompanyFilter) return true;
                       return isSameCompany(e, selectedCompanyFilter.id);
@@ -2096,13 +3156,16 @@ function AppInner() {
                       <div className="grid grid-cols-2 gap-4">
                         <TextField label="Empresa / Razón Social" value={newEmployee.company_id} onChange={e => updateField("company_id", e.target.value)} options={companies} />
                         <TextField label="Departamento" value={newEmployee.department} onChange={e => updateField("department", e.target.value)} options={availableDepartments} />
-                        <TextField label="Puesto" value={newEmployee.position} onChange={e => updateField("position", e.target.value)} placeholder="Ej. Reclutador, Gerente de RH..." />
+                        <TextField label="Puesto" value={newEmployee.position} onChange={e => { updateField("position", e.target.value); applyPositionProfile(e.target.value); }} options={[
+                          ...positionProfiles.map(profile => ({ id: profile.position, name: profile.position })),
+                          ...(newEmployee.position && !positionProfiles.some(profile => profile.position === newEmployee.position) ? [{ id: newEmployee.position, name: newEmployee.position }] : []),
+                        ]} />
                         <TextField 
                           label="Actividades del Puesto" 
                           value={newEmployee.job_activities || ""} 
-                          onChange={e => updateField("job_activities", e.target.value)} 
-                          placeholder="Ej. Reclutamiento de personal, entrevistas, administración de expedientes..." 
+                          readOnly
                         />
+                        <p className="col-span-2 -mt-2 text-[11px]" style={{ color: C.inkSoft }}>Los puestos y sus condiciones se administran en Empresas; al seleccionar uno se cargan automáticamente.</p>
                         <TextField 
                           label="Jefe Directo (Reporta a)" 
                           value={newEmployee.manager_id} 
@@ -2112,10 +3175,11 @@ function AppInner() {
                         <TextField 
                           label="Horario Laboral" 
                           value={newEmployee.work_schedule} 
-                          onChange={e => updateField("work_schedule", e.target.value)} 
-                          placeholder="Ej. Lunes a Viernes de 09:00 a 18:00 hrs" 
+                          readOnly
                         />
                         <TextField label="Fecha de Alta" type="date" required value={newEmployee.hire_date} onChange={e => updateField("hire_date", e.target.value)} />
+                        <TextField label="Fecha de ingreso reconocida para antigüedad (opcional)" type="date" value={newEmployee.recognized_seniority_date} onChange={e => updateField("recognized_seniority_date", e.target.value)} />
+                        <p className="col-span-2 -mt-2 text-[11px]" style={{ color: C.inkSoft }}>Déjala vacía si la antigüedad reconocida coincide con la fecha de alta o no aplica.</p>
                         <TextField label="Estatus" value={newEmployee.employment_status} onChange={e => updateField("employment_status", e.target.value)} options={STATUS_OPTIONS} />
                         <TextField label="Tipo de Contrato" value={newEmployee.contract_type} onChange={e => updateField("contract_type", e.target.value)} options={CONTRACT_TYPES} />
                         <TextField label="Fecha Inicio de Contrato" type="date" value={newEmployee.contract_start_date} onChange={e => updateField("contract_start_date", e.target.value)} />
@@ -2134,10 +3198,10 @@ function AppInner() {
                   {formTab === "nomina" && (
                     <form onSubmit={addEmployee} className="space-y-4">
                       <div className="grid grid-cols-2 gap-4">
-                        <TextField label="S.D Alta (Salario Diario)" type="number" value={newEmployee.base_daily_salary} onChange={e => updateField("base_daily_salary", e.target.value)} />
-                        <TextField label="S.D.I. Alta (Salario Diario Integrado)" type="number" value={newEmployee.sdi_salary} onChange={e => updateField("sdi_salary", e.target.value)} />
-                        <TextField label="Salario Mensual MXN" type="number" value={newEmployee.base_salary} onChange={e => updateField("base_salary", e.target.value)} />
-                        <TextField label="Tipo de Nómina" value={newEmployee.payroll_type} onChange={e => updateField("payroll_type", e.target.value)} options={[{ id: "QUI", name: "Quincenal (QUI)" }, { id: "SEM", name: "Semanal (SEM)" }]} />
+                        <TextField label="S.D Alta (Salario Diario)" type="number" value={newEmployee.base_daily_salary} onChange={e => updateField("base_daily_salary", e.target.value)} readOnly />
+                        <TextField label="S.D.I. Alta (Salario Diario Integrado)" type="number" value={newEmployee.sdi_salary} onChange={e => updateField("sdi_salary", e.target.value)} readOnly />
+                        <TextField label={`Salario ${PAYROLL_OPTIONS.find(option => option.id === normalizePayrollType(newEmployee.payroll_type))?.name || "Quincenal"} MXN`} type="number" value={newEmployee.pay_period_salary} onChange={e => updateField("pay_period_salary", e.target.value)} readOnly />
+                        <TextField label="Modalidad de pago" value={normalizePayrollType(newEmployee.payroll_type)} onChange={e => updateField("payroll_type", e.target.value)} options={PAYROLL_OPTIONS} readOnly />
                         <TextField label="Crédito Infonavit" value={newEmployee.has_infonavit_credit} onChange={e => updateField("has_infonavit_credit", e.target.value)} options={["SI", "NO"]} />
                         <TextField label="Número Crédito Infonavit" value={newEmployee.infonavit_credit_number} onChange={e => updateField("infonavit_credit_number", e.target.value)} />
                         <TextField label="Valor Descuento Infonavit" type="number" value={newEmployee.infonavit_discount_value} onChange={e => updateField("infonavit_discount_value", e.target.value)} />
@@ -2165,7 +3229,7 @@ function AppInner() {
                           {employeeHistory.map((h, idx) => (
                             <div key={idx} className="p-3 rounded-lg border text-xs bg-slate-50" style={{ borderColor: C.line }}>
                               <p className="font-semibold">{h.action || "Movimiento"}</p>
-                              <p className="text-[10px] text-slate-400">{h.created_at?.slice(0, 10)}</p>
+                              <p className="text-[10px] text-slate-400">{formatDate(h.created_at)}</p>
                             </div>
                           ))}
                         </div>
@@ -2174,21 +3238,61 @@ function AppInner() {
                   )}
                 </div>
               </div>
+            ) : !selectedCompanyFilter ? (
+              <div>
+                <div className="mb-6 inline-block rounded-xl border border-white/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-sm">
+                  <h1 className="text-2xl font-semibold mb-1" style={{ color: C.ink }}>Directorio de Colaboradores</h1>
+                  <p className="text-sm" style={{ color: C.inkSoft }}>Selecciona una empresa para ver a sus colaboradores.</p>
+                </div>
+
+                {companiesLoading ? <Spinner label="Cargando empresas…" /> : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {companies.map((c) => {
+                      const count = employees.filter(e => isSameCompany(e, c.id)).length;
+                      return (
+                        <button
+                          key={c.id}
+                          onClick={() => { setSelectedEmployeeDepartment(null); setSelectedCompanyFilter(c); }}
+                          className="text-left rounded-2xl p-5 bg-white border cursor-pointer hover:shadow-md transition-shadow"
+                          style={{ borderColor: C.line }}
+                        >
+                          <div className="flex items-center gap-3 mb-3">
+                            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: C.primarySoft }}>
+                              <Building2 size={18} style={{ color: C.primary }} />
+                            </div>
+                            <h2 className="text-sm font-bold" style={{ color: C.ink }}>{c.legal_name || c.name}</h2>
+                          </div>
+                          <p className="text-xs" style={{ color: C.inkSoft }}>
+                            {count} {count === 1 ? "colaborador" : "colaboradores"}
+                          </p>
+                        </button>
+                      );
+                    })}
+
+                    {companies.length === 0 && (
+                      <div className="col-span-full rounded-2xl p-8 text-center bg-white border" style={{ borderColor: C.line }}>
+                        <p className="text-sm" style={{ color: C.inkSoft }}>
+                          No hay empresas registradas todavía. Ve a la sección "Empresas" para crear una.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             ) : selectedEmployee ? (
               <EmployeeDetail
                 employee={selectedEmployee}
                 onBack={() => setSelectedEmployeeId(null)}
                 onEdit={() => openNewEmployeeForm(selectedEmployee)}
                 templates={templates}
+                onTemplatesChange={setTemplates}
                 documents={employeeDocuments}
                 selectedTemplateId={selectedTemplateId}
                 onSelectTemplate={setSelectedTemplateId}
                 onGenerate={generateDocument}
                 generating={generatingDoc}
                 isMultiForm={
-                  templates.find((t) => t.id === selectedTemplateId)?.name ===
-                    "Formato Múltiple de Solicitudes" ||
-                  selectedTemplateId === "formato_multiple"
+                  (templates.find((t) => t.id === selectedTemplateId)?.template_type_id || selectedTemplateId) === "formato_multiple"
                 }
                 multiFormOptions={multiFormOptions}
                 checkedOptions={checkedOptions}
@@ -2226,10 +3330,20 @@ function AppInner() {
               />
             ) : (
               <div>
+                <button
+                  onClick={() => { setSelectedCompanyFilter(null); setSelectedEmployeeDepartment(null); }}
+                  className="mb-3 inline-flex items-center gap-1 rounded-lg border border-white/80 bg-white/90 px-3 py-2 text-xs font-medium shadow-sm backdrop-blur-sm cursor-pointer"
+                  style={{ color: C.inkSoft }}
+                >
+                  <ArrowLeft size={14} /> Volver a empresas
+                </button>
+
                 <div className="flex items-center justify-between mb-6">
-                  <div>
-                    <h1 className="text-2xl font-semibold mb-1" style={{ color: C.ink }}>Directorio de Colaboradores</h1>
-                    <p className="text-sm" style={{ color: C.inkSoft }}>Gestión y expediente digital de tu personal.</p>
+                  <div className="rounded-xl border border-white/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-sm">
+                    <h1 className="text-2xl font-semibold mb-1" style={{ color: C.ink }}>
+                      {selectedCompanyFilter.legal_name || selectedCompanyFilter.name}
+                    </h1>
+                    <p className="text-sm" style={{ color: C.inkSoft }}>{selectedEmployeeDepartment ? `Colaboradores del departamento ${selectedEmployeeDepartment}.` : "Selecciona un departamento para ver a sus colaboradores."}</p>
                   </div>
 
                   <div className="flex gap-2">
@@ -2263,29 +3377,40 @@ function AppInner() {
                   </div>
                 </div>
 
-                <div className="flex border-b mb-5 gap-6" style={{ borderColor: C.line }}>
+                <div className="mb-5 inline-flex w-fit items-center gap-1 rounded-xl border border-white/80 bg-white/90 p-1 shadow-sm backdrop-blur-sm">
                   <button
                     onClick={() => setEmployeeStatusTab("activo")}
-                    className="pb-2 text-xs font-semibold cursor-pointer"
-                    style={{ borderBottom: employeeStatusTab === "activo" ? `2px solid ${C.primary}` : "none", color: employeeStatusTab === "activo" ? C.primary : C.inkSoft }}
+                    className="rounded-lg px-3 py-2 text-xs font-semibold cursor-pointer transition-colors"
+                    style={{ background: employeeStatusTab === "activo" ? C.primarySoft : "transparent", color: employeeStatusTab === "activo" ? C.primary : C.inkSoft }}
                   >
                     Activos ({employees.filter(e => isSameCompany(e, selectedCompanyFilter?.id) && (e.employment_status || "activo") === "activo").length})
                   </button>
                   <button
                     onClick={() => setEmployeeStatusTab("baja")}
-                    className="pb-2 text-xs font-semibold cursor-pointer"
-                    style={{ borderBottom: employeeStatusTab === "baja" ? `2px solid ${C.primary}` : "none", color: employeeStatusTab === "baja" ? C.primary : C.inkSoft }}
+                    className="rounded-lg px-3 py-2 text-xs font-semibold cursor-pointer transition-colors"
+                    style={{ background: employeeStatusTab === "baja" ? C.primarySoft : "transparent", color: employeeStatusTab === "baja" ? C.primary : C.inkSoft }}
                   >
                     Bajas ({employees.filter(e => isSameCompany(e, selectedCompanyFilter?.id) && e.employment_status === "baja").length})
                   </button>
                   <button
                     onClick={() => setEmployeeStatusTab("todos")}
-                    className="pb-2 text-xs font-semibold cursor-pointer"
-                    style={{ borderBottom: employeeStatusTab === "todos" ? `2px solid ${C.primary}` : "none", color: employeeStatusTab === "todos" ? C.primary : C.inkSoft }}
+                    className="rounded-lg px-3 py-2 text-xs font-semibold cursor-pointer transition-colors"
+                    style={{ background: employeeStatusTab === "todos" ? C.primarySoft : "transparent", color: employeeStatusTab === "todos" ? C.primary : C.inkSoft }}
                   >
                     Todos ({employees.filter(e => isSameCompany(e, selectedCompanyFilter?.id)).length})
                   </button>
                 </div>
+
+                {selectedEmployeeDepartment && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEmployeeDepartment(null)}
+                    className="mb-4 inline-flex items-center gap-1 rounded-lg border border-white/80 bg-white/90 px-3 py-2 text-xs font-semibold shadow-sm backdrop-blur-sm cursor-pointer"
+                    style={{ color: C.primary }}
+                  >
+                    <ArrowLeft size={14} /> Volver a departamentos
+                  </button>
+                )}
 
                 <div className="flex items-center gap-3 mb-5">
                   <div className="relative flex-1">
@@ -2305,7 +3430,7 @@ function AppInner() {
                   {employeeStatusTab === "activo" && (
                     <div className="flex gap-2">
                       <button
-                        onClick={() => setShowAddExportAltasModal(true)}
+                        onClick={() => { setExportMode("altas"); setShowAddExportAltasModal(true); }}
                         className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold text-white whitespace-nowrap cursor-pointer"
                         style={{ background: C.primary }}
                       >
@@ -2313,7 +3438,19 @@ function AppInner() {
                       </button>
 
                       <button
-                        onClick={() => setShowBatchModal(true)}
+                        onClick={() => {
+                          const initialCompany = selectedCompanyFilter || companies[0] || null;
+                          const firstTemplate = initialCompany?.templates?.[0];
+                          setBatchMode("generate");
+                          setBatchCompanyId(initialCompany?.id || "");
+                          setBatchDepartment("all");
+                          setBatchEmployeeStatus("activo");
+                          if (firstTemplate) {
+                            setBatchDocType(firstTemplate.document_type);
+                            setBatchSubType(firstTemplate.sub_type || "General");
+                          }
+                          setShowBatchModal(true);
+                        }}
                         className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold text-white whitespace-nowrap cursor-pointer transition-all hover:opacity-90"
                         style={{ background: C.ok }}
                       >
@@ -2324,11 +3461,36 @@ function AppInner() {
 
                   {employeeStatusTab === "baja" && (
                     <button
-                      onClick={exportBajasToExcel}
+                      onClick={() => { setExportMode("bajas"); setShowAddExportAltasModal(true); }}
                       className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-semibold text-white whitespace-nowrap cursor-pointer"
                       style={{ background: C.ok }}
                     >
                       <FileSpreadsheet size={16} /> Exportar Bajas (Excel)
+                    </button>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 mb-5">
+                  <select value={listGenderFilter} onChange={e => setListGenderFilter(e.target.value)} className="px-3 py-2 rounded-lg text-xs border outline-none bg-white" style={{ borderColor: C.line }}>
+                    <option value="">Género: Todos</option>
+                    <option value="Masculino">Masculino</option>
+                    <option value="Femenino">Femenino</option>
+                  </select>
+                  <select value={listScheduleFilter} onChange={e => setListScheduleFilter(e.target.value)} className="px-3 py-2 rounded-lg text-xs border outline-none bg-white" style={{ borderColor: C.line }}>
+                    <option value="">Horario: Todos</option>
+                    {[...new Set(employees.map(e => e.work_schedule).filter(Boolean))].map(sch => (
+                      <option key={sch} value={sch}>{sch}</option>
+                    ))}
+                  </select>
+                  <input type="number" min="0" placeholder="Edad mín." value={listMinAge} onChange={e => setListMinAge(e.target.value)} className="w-24 px-3 py-2 rounded-lg text-xs border outline-none bg-white" style={{ borderColor: C.line }} />
+                  <input type="number" min="0" placeholder="Edad máx." value={listMaxAge} onChange={e => setListMaxAge(e.target.value)} className="w-24 px-3 py-2 rounded-lg text-xs border outline-none bg-white" style={{ borderColor: C.line }} />
+                  {(listGenderFilter || listScheduleFilter || listMinAge || listMaxAge) && (
+                    <button
+                      onClick={() => { setListGenderFilter(""); setListScheduleFilter(""); setListMinAge(""); setListMaxAge(""); }}
+                      className="text-xs underline cursor-pointer"
+                      style={{ color: C.inkSoft }}
+                    >
+                      Limpiar filtros
                     </button>
                   )}
                 </div>
@@ -2342,30 +3504,86 @@ function AppInner() {
                 )}
 
                 {!employeesLoading && !employeesError && (() => {
-                  const companyEmployees = filteredEmployees.filter(e => isSameCompany(e, selectedCompanyFilter?.id));
+                  const companyEmployees = filteredEmployees.filter(e => {
+                    if (!isSameCompany(e, selectedCompanyFilter?.id)) return false;
+                    if (listGenderFilter && e.gender !== listGenderFilter) return false;
+                    if (listScheduleFilter && e.work_schedule !== listScheduleFilter) return false;
+                    if (listMinAge || listMaxAge) {
+                      const age = getAge(e.birth_date);
+                      if (age === null) return false;
+                      if (listMinAge && age < Number(listMinAge)) return false;
+                      if (listMaxAge && age > Number(listMaxAge)) return false;
+                    }
+                    return true;
+                  });
 
-                  if (companyEmployees.length === 0) {
+                  const configuredDepartments = (selectedCompanyFilter.departments || [])
+                    .map(department => typeof department === "string" ? department : department?.name)
+                    .map(department => String(department || "").trim().replace(/\s+/g, " "))
+                    .filter(Boolean);
+                  const departmentLabels = {};
+                  configuredDepartments.forEach(department => {
+                    const key = normalizeDepartmentKey(department);
+                    if (key && !departmentLabels[key]) departmentLabels[key] = department;
+                  });
+                  const groupedByDepartment = companyEmployees.reduce((acc, emp) => {
+                    const rawDepartment = (emp && emp.department) ? String(emp.department).trim().replace(/\s+/g, " ") : "Sin Departamento Asignado";
+                    const key = normalizeDepartmentKey(rawDepartment);
+                    if (!departmentLabels[key]) departmentLabels[key] = rawDepartment;
+                    if (!acc[key]) acc[key] = [];
+                    acc[key].push(emp);
+                    return acc;
+                  }, {});
+                  const departmentEntries = Object.entries(departmentLabels)
+                    .sort(([, labelA], [, labelB]) => labelA.localeCompare(labelB, "es-MX"));
+
+                  if (!selectedEmployeeDepartment) {
                     return (
-                      <div className="rounded-2xl p-8 text-center bg-white border" style={{ borderColor: C.line }}>
-                        <p className="text-sm" style={{ color: C.inkSoft }}>
-                          No hay colaboradores registrados para el filtro seleccionado.
-                        </p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {departmentEntries.map(([deptKey, deptName]) => {
+                          const count = groupedByDepartment[deptKey]?.length || 0;
+                          return (
+                            <button
+                              key={deptName}
+                              type="button"
+                              onClick={() => setSelectedEmployeeDepartment(deptName)}
+                              className="flex items-center justify-between rounded-2xl border bg-white p-5 text-left shadow-2xs transition hover:shadow-md"
+                              style={{ borderColor: C.line }}
+                            >
+                              <span className="flex items-center gap-3">
+                                <span className="flex h-10 w-10 items-center justify-center rounded-xl" style={{ background: C.primarySoft }}>
+                                  <Users size={18} style={{ color: C.primary }} />
+                                </span>
+                                <span>
+                                  <span className="block text-sm font-bold" style={{ color: C.ink }}>{deptName}</span>
+                                  <span className="mt-1 block text-xs" style={{ color: C.inkSoft }}>{count} {count === 1 ? "colaborador" : "colaboradores"}</span>
+                                </span>
+                              </span>
+                              <ChevronRight size={18} style={{ color: C.inkSoft }} />
+                            </button>
+                          );
+                        })}
+                        {departmentEntries.length === 0 && (
+                          <div className="col-span-full rounded-2xl border bg-white p-8 text-center" style={{ borderColor: C.line }}>
+                            <p className="text-sm" style={{ color: C.inkSoft }}>Esta empresa aún no tiene departamentos ni colaboradores registrados.</p>
+                          </div>
+                        )}
                       </div>
                     );
                   }
 
-                  const groupedByDepartment = companyEmployees.reduce((acc, emp) => {
-                    const dept = (emp && emp.department) ? String(emp.department).trim() : "Sin Departamento Asignado";
-                    if (!acc[dept]) acc[dept] = [];
-                    acc[dept].push(emp);
-                    return acc;
-                  }, {});
+                  const selectedDepartmentKey = normalizeDepartmentKey(selectedEmployeeDepartment);
+                  const departmentEmployees = groupedByDepartment[selectedDepartmentKey] || [];
 
                   return (
                     <div className="space-y-6">
-                      {Object.entries(groupedByDepartment).map(([deptName, deptEmployees]) => (
+                      {departmentEmployees.length === 0 ? (
+                        <div className="rounded-2xl border bg-white p-8 text-center" style={{ borderColor: C.line }}>
+                          <p className="text-sm" style={{ color: C.inkSoft }}>No hay colaboradores en este departamento para el filtro seleccionado.</p>
+                        </div>
+                      ) : (
                         <div 
-                          key={deptName} 
+                          key={selectedEmployeeDepartment}
                           className="rounded-2xl overflow-hidden bg-white border shadow-2xs space-y-0" 
                           style={{ borderColor: C.line }}
                         >
@@ -2376,16 +3594,16 @@ function AppInner() {
                             <div className="flex items-center gap-2">
                               <span className="w-2.5 h-2.5 rounded-full" style={{ background: C.primary }}></span>
                               <h2 className="text-xs font-bold uppercase tracking-wider" style={{ color: C.primary }}>
-                                {deptName}
+                                {selectedEmployeeDepartment}
                               </h2>
                             </div>
                             <span className="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-white text-slate-700 border border-slate-200">
-                              {deptEmployees.length} {deptEmployees.length === 1 ? "colaborador" : "colaboradores"}
+                              {departmentEmployees.length} {departmentEmployees.length === 1 ? "colaborador" : "colaboradores"}
                             </span>
                           </div>
 
                           <div className="divide-y" style={{ borderColor: C.line }}>
-                            {deptEmployees.map((e, idx) => (
+                            {departmentEmployees.map((e, idx) => (
                               <div
                                 key={e.id || `emp-${idx}`}
                                 onClick={() => setSelectedEmployeeId(e.id)}
@@ -2417,7 +3635,7 @@ function AppInner() {
                                     {e.employment_status || "activo"}
                                   </Badge>
 
-                                  {isAdmin && (
+                                  {hasFullMenuAccess && (
                                     <button
                                       type="button"
                                       onClick={(evt) => handleDeleteEmployee(evt, e.id, `${e.first_name} ${e.last_name || ''}`)}
@@ -2435,7 +3653,7 @@ function AppInner() {
                             ))}
                           </div>
                         </div>
-                      ))}
+                      )}
                     </div>
                   );
                 })()}
@@ -2447,8 +3665,10 @@ function AppInner() {
         {showExportAltasModal && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
             <div className="bg-white rounded-2xl p-6 max-w-md w-full space-y-4 shadow-xl">
-              <h2 className="text-lg font-bold" style={{ color: C.ink }}>Exportar Formato de Altas (Excel)</h2>
-              <p className="text-xs text-slate-500">Selecciona el criterio de filtrado para generar el documento de altas con formato corporativo.</p>
+              <h2 className="text-lg font-bold" style={{ color: C.ink }}>
+                {exportMode === "bajas" ? "Exportar Bajas (Excel)" : "Exportar Formato de Altas (Excel)"}
+              </h2>
+              <p className="text-xs text-slate-500">Selecciona los filtros para generar el documento.</p>
               
               <div className="space-y-3">
                 <label className="flex items-center gap-2 text-xs cursor-pointer font-medium">
@@ -2479,17 +3699,44 @@ function AppInner() {
                   <div className="pl-6">
                     <select value={exportSelectedEmployeeId} onChange={e => setExportSelectedEmployeeId(e.target.value)} className="w-full px-3 py-2 rounded-lg text-xs border outline-none bg-white">
                       <option value="">Selecciona Colaborador…</option>
-                      {employees.filter(e => e.employment_status === "activo").map(e => <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>)}
+                      {employees.filter(e => e.employment_status === (exportMode === "bajas" ? "baja" : "activo")).map(e => <option key={e.id} value={e.id}>{e.first_name} {e.last_name}</option>)}
                     </select>
                   </div>
                 )}
+              </div>
+
+              <div className="pt-2 border-t space-y-2" style={{ borderColor: C.line }}>
+                <p className="text-[11px] font-semibold uppercase" style={{ color: C.inkSoft }}>Filtros adicionales (opcional)</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <select value={exportGender} onChange={e => setExportGender(e.target.value)} className="px-3 py-2 rounded-lg text-xs border outline-none bg-white">
+                    <option value="">Género: Todos</option>
+                    <option value="Masculino">Masculino</option>
+                    <option value="Femenino">Femenino</option>
+                  </select>
+                  <select value={exportSchedule} onChange={e => setExportSchedule(e.target.value)} className="px-3 py-2 rounded-lg text-xs border outline-none bg-white">
+                    <option value="">Horario: Todos</option>
+                    {[...new Set(employees.map(e => e.work_schedule).filter(Boolean))].map(sch => (
+                      <option key={sch} value={sch}>{sch}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="number" min="0" placeholder="Edad mínima"
+                    value={exportMinAge} onChange={e => setExportMinAge(e.target.value)}
+                    className="px-3 py-2 rounded-lg text-xs border outline-none bg-white"
+                  />
+                  <input
+                    type="number" min="0" placeholder="Edad máxima"
+                    value={exportMaxAge} onChange={e => setExportMaxAge(e.target.value)}
+                    className="px-3 py-2 rounded-lg text-xs border outline-none bg-white"
+                  />
+                </div>
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t" style={{ borderColor: C.line }}>
                 <button onClick={() => setShowAddExportAltasModal(false)} className="px-4 py-2 rounded-lg text-xs font-medium border cursor-pointer" style={{ borderColor: C.line, color: C.inkSoft }}>
                   Cancelar
                 </button>
-                <button onClick={processExportAltasExcel} className="px-4 py-2 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 cursor-pointer" style={{ background: C.primary }}>
+                <button onClick={exportMode === "bajas" ? exportBajasToExcel : processExportAltasExcel} className="px-4 py-2 rounded-lg text-xs font-semibold text-white flex items-center gap-1.5 cursor-pointer" style={{ background: C.primary }}>
                   <Download size={14} /> Descargar Excel
                 </button>
               </div>
@@ -2511,15 +3758,27 @@ function AppInner() {
               </div>
 
               <p className="text-xs text-slate-500">
-                Genera en lote todos los documentos de los colaboradores de la empresa seleccionada utilizando sus respectivas plantillas registradas.
+                {batchMode === "generate"
+                  ? "Genera en lote los formatos que ya tienen una plantilla cargada para la empresa seleccionada."
+                  : "Descarga en lote los archivos existentes en los expedientes de la empresa, organizados por colaborador."}
               </p>
 
               <div className="space-y-4 text-xs">
                 <div>
                   <label className="font-bold block mb-1 text-slate-700">1. Empresa / Razón Social *</label>
                   <select
-                    value={exportSelectedCompanyId || (selectedCompanyFilter ? selectedCompanyFilter.id : "")}
-                    onChange={(e) => setExportSelectedCompanyId(e.target.value)}
+                    value={batchCompanyId}
+                    onChange={(e) => {
+                      const nextCompanyId = e.target.value;
+                      const nextCompany = companies.find(company => String(company.id) === String(nextCompanyId));
+                      const firstTemplate = nextCompany?.templates?.[0];
+                      setBatchCompanyId(nextCompanyId);
+                      setBatchDepartment("all");
+                      if (batchMode === "generate") {
+                        setBatchDocType(firstTemplate?.document_type || COMPANY_TEMPLATE_DOCUMENT_TYPES[0]);
+                        setBatchSubType(firstTemplate?.sub_type || "General");
+                      }
+                    }}
                     className="w-full px-3 py-2.5 rounded-xl border bg-slate-50 outline-none focus:border-[#1B4B43]"
                     style={{ borderColor: C.line }}
                   >
@@ -2530,56 +3789,65 @@ function AppInner() {
                   </select>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold block mb-1 text-slate-700">2. Acción *</label>
+                  <select value={batchMode} onChange={(e) => {
+                    const nextMode = e.target.value;
+                    setBatchMode(nextMode);
+                    if (nextMode === "files") setBatchDocType("Expediente Completo");
+                    else {
+                      const firstType = batchTemplateTypes[0] || "Contratos";
+                      setBatchDocType(firstType);
+                      const firstSubtype = batchAvailableTemplates.find(template => template.document_type === firstType)?.sub_type || "General";
+                      setBatchSubType(firstSubtype);
+                    }
+                  }} className="w-full px-3 py-2.5 rounded-xl border bg-slate-50 outline-none focus:border-[#1B4B43]" style={{ borderColor: C.line }}>
+                    <option value="generate">Generar formatos usando plantillas</option>
+                    <option value="files">Descargar archivos del expediente</option>
+                  </select>
+                </div>
+
+                <div className={batchMode === "generate" ? "grid grid-cols-2 gap-3" : "grid grid-cols-1 gap-3"}>
                   <div>
-                    <label className="font-bold block mb-1 text-slate-700">2. Tipo de Documento *</label>
+                    <label className="font-bold block mb-1 text-slate-700">3. Tipo de Documento *</label>
                     <select
                       value={batchDocType}
                       onChange={(e) => {
                         setBatchDocType(e.target.value);
-                        if (e.target.value === "Contratos") setBatchSubType("Indeterminado");
-                        else setBatchSubType("General");
+                        const firstSubtype = batchAvailableTemplates.find(template => template.document_type === e.target.value)?.sub_type || "General";
+                        setBatchSubType(firstSubtype);
                       }}
                       className="w-full px-3 py-2.5 rounded-xl border bg-slate-50 outline-none focus:border-[#1B4B43]"
                       style={{ borderColor: C.line }}
                     >
-                      <option value="Contratos">Contratos</option>
-                      <option value="Convenio de Confidencialidad">Convenio de Confidencialidad</option>
-                      <option value="Aviso de Privacidad">Aviso de Privacidad</option>
-                      <option value="Formatos Varios">Formatos Varios</option>
+                      {batchMode === "files"
+                        ? BATCH_FILE_CATEGORIES.map(category => <option key={category} value={category}>{category === "Expediente Completo" ? "Todos los documentos del expediente" : category}</option>)
+                        : batchTemplateTypeOptions.map(type => {
+                          const hasTemplate = batchTemplateTypes.includes(type);
+                          return <option key={type} value={type} disabled={!hasTemplate}>{hasTemplate ? type : `${type} (cargar plantilla)`}</option>;
+                        })}
                     </select>
+                    {batchMode === "generate" && <p className="mt-1 text-[10px] text-slate-500">Los formatos sin plantilla se habilitan al subir su archivo .docx en Empresas → Formatos. Los tipos personalizados también se agregan automáticamente.</p>}
                   </div>
 
-                  <div>
-                    <label className="font-bold block mb-1 text-slate-700">3. Variante / Subtipo *</label>
-                    {batchDocType === "Contratos" ? (
+                  {batchMode === "generate" && <div>
+                    <label className="font-bold block mb-1 text-slate-700">4. Variante / Subtipo *</label>
                       <select
                         value={batchSubType}
                         onChange={(e) => setBatchSubType(e.target.value)}
+                        disabled={!batchSubtypes.length}
                         className="w-full px-3 py-2.5 rounded-xl border bg-slate-50 outline-none focus:border-[#1B4B43]"
                         style={{ borderColor: C.line }}
                       >
-                        <option value="Indeterminado">Contrato Indeterminado</option>
-                        <option value="Determinado">Contrato Determinado</option>
-                        <option value="Periodo de Prueba 90 días">Periodo de Prueba (90 días)</option>
-                        <option value="Periodo de Prueba 180 días">Periodo de Prueba (180 días)</option>
-                        <option value="Capacitación Inicial">Capacitación Inicial</option>
+                        {batchSubtypes.length
+                          ? batchSubtypes.map(subtype => <option key={subtype} value={subtype}>{subtype}</option>)
+                          : <option value="">Sin variantes cargadas</option>}
                       </select>
-                    ) : (
-                      <input
-                        type="text"
-                        value={batchSubType}
-                        onChange={(e) => setBatchSubType(e.target.value)}
-                        placeholder="Ej. General"
-                        className="w-full px-3 py-2.5 rounded-xl border bg-slate-50 outline-none focus:border-[#1B4B43]"
-                        style={{ borderColor: C.line }}
-                      />
-                    )}
-                  </div>
+                    </div>}
                 </div>
 
                 <div>
-                  <label className="font-bold block mb-1 text-slate-700">4. Departamento (Opcional)</label>
+                  <label className="font-bold block mb-1 text-slate-700">{batchMode === "generate" ? "5." : "4."} Departamento (Opcional)</label>
                   <select
                     value={batchDepartment}
                     onChange={(e) => setBatchDepartment(e.target.value)}
@@ -2587,9 +3855,19 @@ function AppInner() {
                     style={{ borderColor: C.line }}
                   >
                     <option value="all">Todos los Departamentos de la Empresa</option>
-                    {DEPARTMENTS.map(d => (
-                      <option key={d} value={d}>{d}</option>
+                    {batchCompanyDepartments.map(department => (
+                      <option key={department} value={department}>{department}</option>
                     ))}
+                  </select>
+                  {!batchCompanyDepartments.length && batchCompanyId && <p className="mt-1 text-[10px] text-amber-700">La empresa no tiene departamentos registrados. El filtro mostrará todos sus colaboradores.</p>}
+                </div>
+
+                <div>
+                  <label className="font-bold block mb-1 text-slate-700">Estatus de colaboradores</label>
+                  <select value={batchEmployeeStatus} onChange={(e) => setBatchEmployeeStatus(e.target.value)} className="w-full px-3 py-2.5 rounded-xl border bg-slate-50 outline-none focus:border-[#1B4B43]" style={{ borderColor: C.line }}>
+                    <option value="activo">Activos</option>
+                    <option value="baja">Bajas</option>
+                    <option value="todos">Todos</option>
                   </select>
                 </div>
               </div>
@@ -2605,9 +3883,9 @@ function AppInner() {
                 </button>
                 <button
                   type="button"
-                  disabled={batchGenerating || (!exportSelectedCompanyId && !selectedCompanyFilter)}
+                  disabled={batchGenerating || !batchCompanyId || (batchMode === "generate" && (!batchTemplateTypes.includes(batchDocType) || !batchSubtypes.length))}
                   onClick={async () => {
-                    const compId = exportSelectedCompanyId || (selectedCompanyFilter ? selectedCompanyFilter.id : null);
+                    const compId = batchCompanyId;
                     if (!compId) {
                       alert("Selecciona una empresa para realizar la generación masiva.");
                       return;
@@ -2624,9 +3902,11 @@ function AppInner() {
                           "Authorization": `Bearer ${token}`
                         },
                         body: JSON.stringify({
+                          mode: batchMode === "files" ? "files" : "generate",
                           document_type: batchDocType,
                           sub_type: batchSubType,
-                          department: batchDepartment
+                          department: batchDepartment,
+                          employment_status: batchEmployeeStatus,
                         })
                       });
 
@@ -2666,7 +3946,7 @@ function AppInner() {
         {view === "leave" && (
           <LeaveModule 
             token={token} 
-            isAdmin={isAdmin} 
+            isAdmin={hasFullMenuAccess}
             myBalance={myBalance} 
             leaveRequests={leaveRequests} 
             leaveTypes={leaveTypes}
@@ -2678,54 +3958,69 @@ function AppInner() {
           />
         )}
 
-        {view === "users" && isAdmin && (
+        {view === "users" && canManageUsers && (
           <div>
             <div className="flex items-center justify-between mb-6">
-              <div>
+              <div className="rounded-xl border border-white/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-sm">
                 <h1 className="text-2xl font-semibold mb-1" style={{ color: C.ink }}>Usuarios</h1>
-                <p className="text-sm" style={{ color: C.inkSoft }}>Cuentas de acceso al sistema ({users.length})</p>
+              <p className="text-sm" style={{ color: C.inkSoft }}>Cuentas de acceso al sistema ({filteredUsers.length} de {users.length})</p>
               </div>
-              <button onClick={() => { setShowAddUser(v => !v); setLastCreatedPassword(""); setUserSaveError(""); }}
+              <button onClick={() => { setShowAddUser(v => !v); setLastCreatedPassword(""); setUserSaveError(""); setUserSaveNotice(""); }}
                 className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-medium cursor-pointer" style={{ background: C.primary, color: "#fff" }}>
                 <Plus size={16} /> Nueva cuenta
               </button>
             </div>
 
+            <div className="relative mb-4 max-w-md">
+              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: C.inkSoft }} />
+              <input
+                type="search"
+                value={usersSearch}
+                onChange={event => setUsersSearch(event.target.value)}
+                placeholder="Buscar por correo, rol o estatus..."
+                className="w-full pl-9 pr-3 py-2.5 rounded-lg text-sm outline-none border bg-white"
+                style={{ borderColor: C.line, color: C.ink }}
+              />
+            </div>
+
             {showAddUser && (
               <form onSubmit={submitNewUser} className="rounded-2xl p-5 mb-6 bg-white border" style={{ borderColor: C.line }}>
                 <p className="text-xs mb-4" style={{ color: C.inkSoft }}>
-                  Usa el mismo correo que el empleado tiene en su expediente (campo "Correo personal") para que su
-                  cuenta quede vinculada automáticamente a su perfil.
+                  Registra el nombre, área y puesto para que el directorio de mensajería muestre correctamente a cada usuario. Usa el mismo correo del expediente cuando exista. Crear la cuenta no envía correo.
                 </p>
                 <div className="grid grid-cols-3 gap-4 items-end">
+                  <TextField label="Nombre completo" required value={newUser.display_name} onChange={e => setNewUser(f => ({ ...f, display_name: e.target.value }))} placeholder="Nombre y apellidos" />
+                  <TextField label="Departamento" required value={newUser.department} onChange={e => setNewUser(f => ({ ...f, department: e.target.value }))} placeholder="Recursos Humanos" />
+                  <TextField label="Puesto" required value={newUser.position} onChange={e => setNewUser(f => ({ ...f, position: e.target.value }))} placeholder="Reclutador" />
                   <TextField label="Correo" type="email" required value={newUser.email} onChange={e => setNewUser(f => ({ ...f, email: e.target.value }))} placeholder="empleado@empresa.com" />
                   <div>
                     <label className="text-xs font-medium block mb-1.5" style={{ color: C.inkSoft }}>Contraseña temporal *</label>
                     <div className="flex gap-2">
-                      <input value={newUser.password} onChange={e => setNewUser(f => ({ ...f, password: e.target.value }))} className="w-full px-3 py-2.5 rounded-lg text-sm outline-none border" style={{ borderColor: C.line }} />
+                      <input type="password" minLength={8} required value={newUser.password} onChange={e => setNewUser(f => ({ ...f, password: e.target.value }))} className="w-full px-3 py-2.5 rounded-lg text-sm outline-none border" style={{ borderColor: C.line }} />
                       <button type="button" onClick={generatePassword} className="px-3 rounded-lg text-xs shrink-0 cursor-pointer" style={{ background: C.primarySoft, color: C.primary }}>Generar</button>
                     </div>
                   </div>
-                  <TextField label="Rol" value={newUser.role} onChange={e => setNewUser(f => ({ ...f, role: e.target.value }))} options={["admin", "empleado"]} />
+                  <TextField label="Rol" value={newUser.role} onChange={e => setNewUser(f => ({ ...f, role: e.target.value }))} options={["admin", "reclutamiento", "empleado"]} />
                 </div>
                 {userSaveError && <p className="text-xs mt-3" style={{ color: C.danger }}>{userSaveError}</p>}
                 <div className="flex justify-end mt-4">
-                  <button type="submit" disabled={userSaving} className="px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 cursor-pointer" style={{ background: C.primary, color: "#fff" }}>
-                    <Loader2 size={14} className={userSaving ? "animate-spin opacity-100" : "opacity-0 w-0"} /> Crear cuenta
+                  <button type="submit" disabled={userSaving} className="px-4 py-2 rounded-lg text-sm font-medium flex items-center gap-2 cursor-pointer disabled:opacity-60" style={{ background: C.primary, color: "#fff" }}>
+                    {userSaving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Crear cuenta
                   </button>
                 </div>
               </form>
             )}
 
-            {lastCreatedPassword && (
-              <div className="rounded-2xl p-5 mb-6 flex items-center justify-between" style={{ background: C.okSoft }}>
+            {(userSaveNotice || lastCreatedPassword) && (
+              <div className="rounded-2xl p-5 mb-6 flex items-center justify-between gap-4" style={{ background: lastCreatedPassword ? C.accentSoft : C.okSoft }}>
                 <div>
-                  <p className="text-sm font-medium" style={{ color: C.ok }}>Cuenta creada. Comparte esta contraseña temporal con el empleado:</p>
-                  <p className="text-lg font-mono font-semibold" style={{ color: C.ok }}>{lastCreatedPassword}</p>
+                  <p className="text-sm font-medium" style={{ color: lastCreatedPassword ? C.accent : C.ok }}>{userSaveNotice || "Acceso listo."}</p>
+                  {lastCreatedPassword && <p className="mt-2 text-xs" style={{ color: C.inkSoft }}>Como el correo no se pudo enviar, comparte manualmente esta contraseña temporal:</p>}
+                  {lastCreatedPassword && <p className="text-lg font-mono font-semibold" style={{ color: C.accent }}>{lastCreatedPassword}</p>}
                 </div>
-                <button onClick={() => navigator.clipboard.writeText(lastCreatedPassword)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium cursor-pointer" style={{ background: "#fff", color: C.ok }}>
+                {lastCreatedPassword && <button onClick={() => navigator.clipboard.writeText(lastCreatedPassword)} className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium cursor-pointer" style={{ background: "#fff", color: C.accent }}>
                   <Copy size={13} /> Copiar
-                </button>
+                </button>}
               </div>
             )}
 
@@ -2733,28 +4028,37 @@ function AppInner() {
 
             {!usersLoading && (
               <div className="rounded-2xl overflow-hidden bg-white border" style={{ borderColor: C.line }}>
-                {users.map((u, i) => {
+                {filteredUsers.map((u, i) => {
                   const isSelf = u.id === user.id;
                   return (
                     <div key={u.id} className="flex items-center justify-between px-5 py-4" style={{ borderBottom: i < users.length - 1 ? `1px solid ${C.line}` : "none" }}>
                       <div className="flex items-center gap-3">
                         <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-semibold" style={{ background: C.primarySoft, color: C.primary }}>{initials(u.email)}</div>
                         <div>
-                          <p className="text-sm font-medium" style={{ color: C.ink }}>{u.email}{isSelf && <span className="font-normal" style={{ color: C.inkSoft }}> (tú)</span>}</p>
-                          <p className="text-xs" style={{ color: C.inkSoft }}>Creada el {u.created_at?.slice(0, 10)}</p>
+                          <p className="text-sm font-medium" style={{ color: C.ink }}>{u.display_name || u.email}{isSelf && <span className="font-normal" style={{ color: C.inkSoft }}> (tú)</span>}</p>
+                          <p className="text-xs" style={{ color: C.inkSoft }}>{u.email}{u.department ? ` · ${u.department}` : ""}{u.position ? ` · ${u.position}` : ""}</p>
+                          <p className="text-xs" style={{ color: C.inkSoft }}>
+                            Creada el {formatDate(u.created_at)}{u.must_change_password ? " · Cambio de contraseña pendiente" : ""}
+                          </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
+                        <button type="button" onClick={() => editUserChatProfile(u)} className="p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer" style={{ color: C.primary }} title="Editar nombre, departamento y puesto del chat">
+                          <Pencil size={15} />
+                        </button>
                         <select
-                          value={u.role}
-                          disabled={isSelf}
+                          value={normalizeManagedUserRole(u.role)}
+                          disabled={isSelf || savingUserRoleId === String(u.id)}
+                          title={isSelf ? "Por seguridad, el rol de tu propia cuenta no se puede cambiar desde aquí." : "Cambiar rol de usuario"}
                           onChange={e => changeUserRole(u.id, e.target.value)}
                           className="px-2.5 py-1.5 rounded-lg text-xs outline-none border bg-white cursor-pointer"
-                          style={{ borderColor: C.line, color: C.ink, opacity: isSelf ? 0.6 : 1 }}
+                          style={{ borderColor: C.line, color: C.ink, opacity: isSelf ? 0.6 : 1, cursor: isSelf || savingUserRoleId === String(u.id) ? "not-allowed" : "pointer" }}
                         >
                           <option value="empleado">empleado</option>
                           <option value="admin">admin</option>
+                          <option value="reclutamiento">reclutamiento</option>
                         </select>
+                        {isSelf && <span className="text-[10px] whitespace-nowrap" style={{ color: C.inkSoft }}>Tu rol está protegido</span>}
                         <button
                           disabled={isSelf}
                           onClick={() => toggleUserActive(u)}
@@ -2778,6 +4082,17 @@ function AppInner() {
                           <Key size={15} />
                         </button>
 
+                        {!isSelf && <button
+                          type="button"
+                          disabled={sendingAccessUserId === u.id}
+                          onClick={() => sendUserAccessEmail(u)}
+                          className="px-2 py-1.5 rounded-lg hover:bg-emerald-50 cursor-pointer transition-colors disabled:opacity-50 flex items-center gap-1.5 text-xs font-medium"
+                          style={{ color: C.ok }}
+                          title="Enviar accesos por correo (requiere aprobación)"
+                        >
+                          {sendingAccessUserId === u.id ? <Loader2 size={15} className="animate-spin" /> : <Send size={14} />} Enviar accesos
+                        </button>}
+
                         {!isSelf && (
                           <button onClick={() => deleteUser(u)} className="p-1.5 rounded-lg hover:bg-red-50 cursor-pointer" style={{ color: C.danger }}>
                             <Trash2 size={15} />
@@ -2787,6 +4102,9 @@ function AppInner() {
                     </div>
                   );
                 })}
+                {filteredUsers.length === 0 && <p className="px-5 py-8 text-center text-sm" style={{ color: C.inkSoft }}>
+                  {users.length ? "No hay usuarios que coincidan con la búsqueda." : "No hay cuentas registradas."}
+                </p>}
               </div>
             )}
           </div>
@@ -2876,6 +4194,35 @@ function AppInner() {
           </div>
         </div>
       )}
+
+      {token && user && (
+        <FloatingChatWidget
+          token={token}
+          user={user}
+          api={api}
+          unreadCount={unreadCount}
+          unreadBySender={unreadBySender}
+          notification={incomingChatNotification}
+          onNotificationOpen={() => {
+            if (!incomingChatNotification) return;
+            setOpenChatContact({
+              id: String(incomingChatNotification.sender_id),
+              email: incomingChatNotification.sender_email,
+              first_name: incomingChatNotification.first_name,
+              last_name: incomingChatNotification.last_name,
+              position: incomingChatNotification.position,
+              department: incomingChatNotification.department,
+              photo_url: incomingChatNotification.photo_url,
+            });
+            setIncomingChatNotification(null);
+          }}
+          onNotificationDismiss={() => setIncomingChatNotification(null)}
+          onRefreshUnread={updateUnreadMessages}
+          openContact={openChatContact}
+          onOpenContactConsumed={() => setOpenChatContact(null)}
+          hidden={view === "messages"}
+        />
+      )}
     </div> 
   );
 }
@@ -2914,8 +4261,8 @@ function LeaveModule({ token, isAdmin, myBalance, leaveRequests, leaveTypes, lea
   const getAbsencesForDay = (dayNumber) => {
     const formattedDate = `${year}-${String(month + 1).padStart(2, '0')}-${String(dayNumber).padStart(2, '0')}`;
     return deptCalendar.filter(item => {
-      const start = item.start_date?.slice(0, 10);
-      const end = item.end_date?.slice(0, 10);
+      const start = formatDate(item.start_date);
+      const end = formatDate(item.end_date);
       return formattedDate >= start && formattedDate <= end;
     });
   };
@@ -2923,7 +4270,7 @@ function LeaveModule({ token, isAdmin, myBalance, leaveRequests, leaveTypes, lea
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between border-b pb-4" style={{ borderColor: C.line }}>
-        <div>
+        <div className="rounded-xl border border-white/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-sm">
           <h1 className="text-2xl font-bold" style={{ color: C.ink }}>Vacaciones y Permisos</h1>
           <p className="text-xs mt-0.5" style={{ color: C.inkSoft }}>
             {isAdmin ? "Administra las solicitudes y supervisa la disponibilidad del equipo." : "Consulta tu saldo de ley, gestiona permisos y revisa las ausencias de tu equipo."}
@@ -3010,7 +4357,7 @@ function LeaveModule({ token, isAdmin, myBalance, leaveRequests, leaveTypes, lea
                         {isAdmin && <span className="font-normal text-xs text-slate-500"> — {r.leave_type || r.request_type || "Vacaciones"}</span>}
                       </p>
                       <p className="text-xs text-slate-500">
-                        {r.start_date?.slice(0, 10)} → {r.end_date?.slice(0, 10)} · {r.days_requested || 1} día(s)
+                        {formatDate(r.start_date)} → {formatDate(r.end_date)} · {r.days_requested || 1} día(s)
                       </p>
                     </div>
                   </div>
@@ -3150,6 +4497,7 @@ function LeaveModule({ token, isAdmin, myBalance, leaveRequests, leaveTypes, lea
 function UserProfileView({ token, user, api, employees = [] }) {
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [failedProfilePhoto, setFailedProfilePhoto] = useState("");
 
   useEffect(() => {
     const matched = employees.find(e => e.personal_email === user?.email);
@@ -3189,8 +4537,8 @@ function UserProfileView({ token, user, api, employees = [] }) {
     <div className="max-w-3xl rounded-2xl p-6 bg-white border" style={{ borderColor: C.line }}>
       <div className="flex items-center gap-5 pb-6 mb-6 border-b" style={{ borderColor: C.line }}>
         <div className="relative w-20 h-20 rounded-full overflow-hidden shrink-0 border" style={{ borderColor: C.line }}>
-          {cleanPhoto ? (
-            <img src={cleanPhoto} alt="" className="w-full h-full object-cover" />
+          {cleanPhoto && failedProfilePhoto !== cleanPhoto ? (
+            <img src={cleanPhoto} alt="" className="w-full h-full object-cover" onError={() => setFailedProfilePhoto(cleanPhoto)} />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-lg font-bold" style={{ background: C.primarySoft, color: C.primary }}>
               {initials(`${profile.first_name} ${profile.last_name}`)}
@@ -3212,7 +4560,7 @@ function UserProfileView({ token, user, api, employees = [] }) {
         <div><p className="text-xs" style={{ color: C.inkSoft }}>CURP</p><p className="font-medium" style={{ color: C.ink }}>{profile.curp || "—"}</p></div>
         <div><p className="text-xs" style={{ color: C.inkSoft }}>RFC</p><p className="font-medium" style={{ color: C.ink }}>{profile.rfc || "—"}</p></div>
         <div><p className="text-xs" style={{ color: C.inkSoft }}>NSS</p><p className="font-medium" style={{ color: C.ink }}>{profile.nss || "—"}</p></div>
-        <div><p className="text-xs" style={{ color: C.inkSoft }}>Fecha de Alta</p><p className="font-medium" style={{ color: C.ink }}>{profile.hire_date?.slice(0, 10)}</p></div>
+        <div><p className="text-xs" style={{ color: C.inkSoft }}>Fecha de Alta</p><p className="font-medium" style={{ color: C.ink }}>{formatDate(profile.hire_date)}</p></div>
         <div><p className="text-xs" style={{ color: C.inkSoft }}>Correo Personal</p><p className="font-medium" style={{ color: C.ink }}>{profile.personal_email}</p></div>
         <div><p className="text-xs" style={{ color: C.inkSoft }}>Salario Base</p><p className="font-medium" style={{ color: C.ink }}>${Number(profile.base_salary || 0).toLocaleString()} MXN</p></div>
         <div><p className="text-xs" style={{ color: C.inkSoft }}>Domicilio Personal</p><p className="font-medium" style={{ color: C.ink }}>{personalAddress}</p></div>
@@ -3358,9 +4706,54 @@ function EmployeeDetail({
   isMultiForm, multiFormOptions = [], checkedOptions = [], onToggleOption, observaciones, onObservacionesChange, fechaSolicitud,
   onFechaSolicitudChange, childName, onChildNameChange, incidentDate, onIncidentDateChange, incidentTime, onIncidentTimeChange,
   incidentLocation, onIncidentLocationChange, witness1, onWitness1Change, witness2, onWitness2Change, photoUploading, onPhotoChange,
-  employeeFiles = [], onUploadFile, onDeleteFile, fileUploading, token, api, loadEmployeeDocuments, loadEmployeeFiles, onSelectBatchPdf
+  employeeFiles = [], onUploadFile, onDeleteFile, fileUploading, token, api, loadEmployeeDocuments, loadEmployeeFiles, onSelectBatchPdf, onTemplatesChange
 }) {
+  const [isDocumentPreviewOpen, setIsDocumentPreviewOpen] = useState(false);
+  const [showFullActivities, setShowFullActivities] = useState(false);
+  const [failedEmployeePhoto, setFailedEmployeePhoto] = useState("");
+  const [companyTemplatePreview, setCompanyTemplatePreview] = useState(null);
+  const [companyTemplateChoice, setCompanyTemplateChoice] = useState(null);
+  const [companyTemplatePreviewLoading, setCompanyTemplatePreviewLoading] = useState(false);
+  const [documentPreviewUrl, setDocumentPreviewUrl] = useState("");
+  const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
+  const [documentPreviewError, setDocumentPreviewError] = useState("");
+  useEffect(() => {
+    setShowFullActivities(false);
+    setFailedEmployeePhoto("");
+  }, [employee?.id]);
+  const selectedTemplate = templates.find((item) => item.id === selectedTemplateId);
+  const openDocumentPreview = async () => {
+    setDocumentPreviewLoading(true);
+    setDocumentPreviewError("");
+    try {
+      const result = await api.previewDocument(token, employee.id, selectedTemplate?.template_type_id || selectedTemplateId, {
+        template_record_id: selectedTemplate?.id,
+        title_override: selectedTemplate?.title,
+        body_override: selectedTemplate?.content,
+        footer_override: selectedTemplate?.footer,
+        include_logo: selectedTemplate?.include_logo,
+        child_name: childName,
+        incident_date: incidentDate,
+        incident_time: incidentTime,
+        incident_location: incidentLocation,
+        observaciones,
+        witness1,
+        witness2,
+        checked_options: checkedOptions,
+        fecha_solicitud: fechaSolicitud,
+      });
+      const baseUrl = API_BASE.replace(/\/api$/, "");
+      setDocumentPreviewUrl(result.file_url.startsWith("http") ? result.file_url : `${baseUrl}${result.file_url}`);
+      setIsDocumentPreviewOpen(true);
+    } catch (error) {
+      setDocumentPreviewError(error.message || "No se pudo preparar la vista previa.");
+    } finally {
+      setDocumentPreviewLoading(false);
+    }
+  };
+
   const REQUIRED_DOCUMENTS = [
+    "CV / Solicitud de Empleo",
     "Identificación Oficial (INE / Pasaporte)",
     "Comprobante de Domicilio",
     "Acta de Nacimiento",
@@ -3371,6 +4764,7 @@ function EmployeeDetail({
     "Estado de Cuenta Bancaria",
     "Carta de Recomendación",
     "Contratos",
+    "ADDENDUM",
     "Convenio de Confidencialidad",
     "Aviso de Privacidad",
     "Formatos Varios",
@@ -3382,10 +4776,39 @@ function EmployeeDetail({
 
   const GENERATABLE_DOCUMENTS = [
     "Contratos",
+    "ADDENDUM",
     "Convenio de Confidencialidad",
     "Aviso de Privacidad",
     "Formatos Varios"
   ];
+
+  async function generateCompanyTemplatePreview(docType, targetCategory, selectedSubType) {
+    setCompanyTemplatePreviewLoading(true);
+    try {
+      const response = await fetch(`${API_BASE}/companies/${employee.company_id}/preview-template`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({ document_type: targetCategory, sub_type: selectedSubType, employee_id: employee.id })
+      });
+      if (!response.ok) {
+        const errData = await response.json();
+        throw new Error(errData.message || "Error al generar el documento.");
+      }
+      const previewBlob = await response.blob();
+      const encodedFilename = response.headers.get("X-Document-Filename") || `${docType}_${employee.first_name}.docx`;
+      let previewFilename = encodedFilename;
+      try { previewFilename = decodeURIComponent(encodedFilename); } catch { /* usar el valor enviado */ }
+      setCompanyTemplatePreview({ blob: previewBlob, filename: previewFilename, title: `${docType}${selectedSubType ? ` · ${selectedSubType}` : ""}` });
+      setCompanyTemplateChoice(null);
+    } catch (error) {
+      alert("No se pudo preparar el documento: " + (error.message || "Error inesperado."));
+    } finally {
+      setCompanyTemplatePreviewLoading(false);
+    }
+  }
 
   const [customTemplateFile, setCustomTemplateFile] = useState(null);
   const [customTemplateName, setCustomTemplateName] = useState("");
@@ -3406,10 +4829,10 @@ function EmployeeDetail({
       formData.append("employee_id", employee.id);
 
       const employeeData = {
-        nombre_completo: `${employee.first_name || ""} ${employee.last_name_paternal || employee.last_name || ""} ${employee.last_name_maternal || ""}`.trim(),
-        nombre: employee.first_name || "",
-        apellido_paterno: employee.last_name_paternal || employee.last_name || "",
-        apellido_materno: employee.last_name_maternal || "",
+        nombre_completo: `${employee.first_name || ""} ${employee.last_name_paternal || employee.last_name || ""} ${employee.last_name_maternal || ""}`.trim().toLocaleUpperCase("es-MX"),
+        nombre: String(employee.first_name || "").toLocaleUpperCase("es-MX"),
+        apellido_paterno: String(employee.last_name_paternal || employee.last_name || "").toLocaleUpperCase("es-MX"),
+        apellido_materno: String(employee.last_name_maternal || "").toLocaleUpperCase("es-MX"),
         curp: employee.curp || "",
         rfc: employee.rfc || "",
         nss: employee.nss || "",
@@ -3440,6 +4863,7 @@ function EmployeeDetail({
         jefe_directo: employee.manager_name || "",
         horario_laboral: employee.work_schedule || "Lunes a Viernes de 09:00 a 18:00 hrs",
         fecha_alta: employee.hire_date ? String(employee.hire_date).slice(0, 10) : "",
+        fecha_alta_escrita: formatDateInSpanishWords(employee.hire_date),
         fecha_ingreso: employee.hire_date ? String(employee.hire_date).slice(0, 10) : "",
 
         tipo_contrato: employee.contract_type || "Indeterminado",
@@ -3501,7 +4925,7 @@ function EmployeeDetail({
       if (res.file_url) {
         const fullUrl = res.file_url.startsWith("http")
           ? res.file_url
-          : `${API_BASE}${res.file_url.startsWith("/") ? "" : "/"}${res.file_url}`;
+          : `${API_BASE.replace(/\/api$/, "")}${res.file_url.startsWith("/") ? "" : "/"}${res.file_url}`;
         
         const link = document.createElement("a");
         link.href = fullUrl;
@@ -3561,26 +4985,32 @@ function EmployeeDetail({
   const personalAddress = `${employee.street || ""} ${employee.exterior_number || ""} ${employee.neighborhood || ""} ${employee.postal_code || ""}`.trim() || employee.address || "—";
   const fiscalAddress = `${employee.fiscal_street || ""} ${employee.fiscal_exterior_number || ""} ${employee.fiscal_neighborhood || ""} ${employee.fiscal_postal_code || ""}`.trim() || "—";
   const cleanPhoto = getCleanPhotoUrl(employee.photo_url);
+  const activitiesText = employee.job_activities || "Sin definir";
+  const canExpandActivities = activitiesText.length > 280;
   const safeFiles = Array.isArray(employeeFiles) ? employeeFiles : [];
   const safeDocs = Array.isArray(documents) ? documents : [];
 
   return (
     <div className="space-y-6 max-w-4xl">
-      <button onClick={onBack} className="flex items-center gap-1 text-xs font-medium mb-2 cursor-pointer" style={{ color: C.inkSoft }}>
+      <button onClick={onBack} className="mb-2 inline-flex items-center gap-1 rounded-lg border border-white/80 bg-white/90 px-3 py-2 text-xs font-medium shadow-sm backdrop-blur-sm cursor-pointer" style={{ color: C.inkSoft }}>
         <ArrowLeft size={14} /> Volver a empleados
       </button>
 
       <div className="rounded-2xl p-6 flex items-center justify-between bg-[#0F172A] text-white border border-slate-800 shadow-xl">
         <div className="flex items-center gap-4">
           <div className="relative w-16 h-16 rounded-full overflow-hidden flex items-center justify-center shrink-0 border border-slate-700 bg-slate-800">
-            {cleanPhoto ? (
-              <img src={cleanPhoto} alt="" className="w-full h-full object-cover" />
+            {cleanPhoto && failedEmployeePhoto !== cleanPhoto ? (
+              <img src={cleanPhoto} alt={`Foto de ${employee.first_name || "colaborador"}`} className="w-full h-full object-cover" onError={() => setFailedEmployeePhoto(cleanPhoto)} />
             ) : (
               <span className="text-lg font-bold text-emerald-400">{initials(`${employee.first_name} ${employee.last_name}`)}</span>
             )}
             <label className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 hover:opacity-100 transition-opacity cursor-pointer">
-              <Camera size={16} color="#fff" />
-              <input type="file" accept="image/*" className="hidden" onChange={e => e.target.files?.[0] && onPhotoChange && onPhotoChange(e.target.files[0])} />
+              {photoUploading ? <Loader2 size={16} color="#fff" className="animate-spin" /> : <Camera size={16} color="#fff" />}
+              <input type="file" accept="image/jpeg,image/png,image/webp,image/gif" className="hidden" disabled={photoUploading} onChange={e => {
+                const file = e.target.files?.[0];
+                if (file && onPhotoChange) onPhotoChange(file);
+                e.target.value = "";
+              }} />
             </label>
           </div>
           <div>
@@ -3598,7 +5028,31 @@ function EmployeeDetail({
           <h2 className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: C.inkSoft }}>Información General</h2>
           <p className="text-xs"><strong>Correo:</strong> {employee.personal_email}</p>
           <p className="text-xs"><strong>Horario Laboral:</strong> {employee.work_schedule || "Lunes a Viernes de 09:00 a 18:00 hrs"}</p>
-          <p className="text-xs"><strong>Actividades del Puesto:</strong> {employee.job_activities || "Sin definir"}</p>
+          <div className="text-xs">
+            <strong>Actividades del Puesto:</strong>
+            <div
+              className="mt-1 whitespace-pre-wrap break-words"
+              style={canExpandActivities && !showFullActivities ? {
+                display: "-webkit-box",
+                WebkitBoxOrient: "vertical",
+                WebkitLineClamp: 5,
+                overflow: "hidden",
+              } : { whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+            >
+              {activitiesText}
+            </div>
+            {canExpandActivities && (
+              <button
+                type="button"
+                aria-expanded={showFullActivities}
+                onClick={() => setShowFullActivities(value => !value)}
+                className="mt-1 text-xs font-semibold cursor-pointer"
+                style={{ color: C.primary }}
+              >
+                {showFullActivities ? "Ver menos" : "Ver más"}
+              </button>
+            )}
+          </div>
           <p className="text-xs"><strong>CURP:</strong> {employee.curp || "—"}</p>
           <p className="text-xs"><strong>RFC:</strong> {employee.rfc || "—"}</p>
           <p className="text-xs"><strong>NSS:</strong> {employee.nss || "—"}</p>
@@ -3607,7 +5061,7 @@ function EmployeeDetail({
           <p className="text-xs"><strong>Salario Base:</strong> ${Number(employee.base_salary || 0).toLocaleString()} MXN</p>
           <p className="text-xs"><strong>Contacto Emergencia:</strong> {employee.emergency_contact_name ? `${employee.emergency_contact_name} (${employee.emergency_contact_phone || "Sin tel."})` : "—"}</p>
           <p className="text-xs"><strong>Beneficiario:</strong> {employee.beneficiary_name ? `${employee.beneficiary_name} ${employee.beneficiary_relationship ? `(${employee.beneficiary_relationship})` : ''} ${employee.beneficiary_phone ? `· ${employee.beneficiary_phone}` : ''}` : "—"}</p>
-          <p className="text-xs"><strong>Alta:</strong> {employee.hire_date?.slice(0, 10)}</p>
+          <p className="text-xs"><strong>Alta:</strong> {formatDate(employee.hire_date)}</p>
         </div>
 
         <div className="rounded-2xl p-5 space-y-4 bg-white border" style={{ borderColor: C.line }}>
@@ -3699,83 +5153,49 @@ function EmployeeDetail({
                         <button
                           type="button"
                           onClick={async () => {
+                            if (companyTemplatePreviewLoading) return;
+                            setCompanyTemplatePreviewLoading(true);
                             try {
                               const tmplRes = await fetch(`${API_BASE}/companies/${employee.company_id}/templates`, {
                                 headers: { Authorization: `Bearer ${token}` }
                               });
-                              const compTemplates = tmplRes.ok ? await tmplRes.json() : [];
+                              if (!tmplRes.ok) {
+                                const errorData = await tmplRes.json().catch(() => ({}));
+                                throw new Error(errorData.message || `No se pudieron consultar las plantillas (HTTP ${tmplRes.status}).`);
+                              }
+                              const compTemplates = await tmplRes.json();
 
                               const targetCategory = docType.includes("Contrato") ? "Contratos" : docType;
-                              const available = compTemplates.filter(t => t.document_type === targetCategory || (targetCategory === "Contratos" && (t.document_type === "Contratos" || t.document_type === "Contrato Firmado")));
+                              const available = (Array.isArray(compTemplates) ? compTemplates : []).filter(t => companyDocumentTypeMatches(t.document_type, targetCategory));
 
                               if (available.length === 0) {
                                 alert(`❌ No hay plantillas de '${docType}' configuradas para la empresa ${employee.company_name || ''}. Cárgalas desde el módulo de Empresas.`);
                                 return;
                               }
 
-                              let selectedSubType = available[0].sub_type;
-
                               if (available.length > 1) {
-                                const optionsList = available.map((t, idx) => `${idx + 1}. ${t.sub_type || 'General'} (${t.file_name})`).join("\n");
-                                const choice = prompt(`Selecciona el tipo de ${docType} a generar:\n\n${optionsList}\n\nIngresa el número de tu opción:`, "1");
-
-                                if (!choice) return;
-                                const selectedIndex = parseInt(choice, 10) - 1;
-
-                                if (isNaN(selectedIndex) || !available[selectedIndex]) {
-                                  alert("Opción inválida.");
-                                  return;
-                                }
-                                selectedSubType = available[selectedIndex].sub_type;
+                                setCompanyTemplateChoice({
+                                  documentType: docType,
+                                  targetCategory,
+                                  templates: available,
+                                  selectedId: String(available[0].id),
+                                });
+                                return;
                               }
-
-                              alert(`⏳ Generando ${docType} (${selectedSubType || 'General'}) para ${employee.first_name}...`);
-
-                              const response = await fetch(`${API_BASE}/companies/${employee.company_id}/fill-template`, {
-                                method: "POST",
-                                headers: {
-                                  "Content-Type": "application/json",
-                                  "Authorization": `Bearer ${token}`
-                                },
-                                body: JSON.stringify({
-                                  document_type: targetCategory,
-                                  sub_type: selectedSubType,
-                                  employee_id: employee.id
-                                })
-                              });
-
-                              if (!response.ok) {
-                                const errData = await response.json();
-                                throw new Error(errData.message || "Error al generar el documento.");
-                              }
-
-                              const res = await response.json();
-
-                              if (loadEmployeeFiles) await loadEmployeeFiles(employee.id);
-
-                              if (res.file_url) {
-                                const fullUrl = res.file_url.startsWith("http")
-                                  ? res.file_url
-                                  : `${API_BASE}${res.file_url.startsWith("/") ? "" : "/"}${res.file_url}`;
-
-                                const link = document.createElement("a");
-                                link.href = fullUrl;
-                                link.target = "_blank";
-                                link.download = res.filename || `${docType}.docx`;
-                                document.body.appendChild(link);
-                                link.click();
-                                document.body.removeChild(link);
-                              }
+                              await generateCompanyTemplatePreview(docType, targetCategory, available[0].sub_type);
                             } catch (err) {
                               alert("❌ Error: " + err.message);
+                            } finally {
+                              setCompanyTemplatePreviewLoading(false);
                             }
                           }}
-                          className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer transition-all hover:opacity-90"
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer transition-all hover:opacity-90 disabled:opacity-60"
+                          disabled={companyTemplatePreviewLoading}
                           style={{ background: C.primarySoft, color: C.primary, border: `1px solid ${C.line}` }}
                           title={`Generar ${docType} desde la plantilla de la empresa`}
                         >
-                          <Send size={12} />
-                          <span>Generar</span>
+                          {companyTemplatePreviewLoading ? <Loader2 size={12} className="animate-spin" /> : <Eye size={12} />}
+                          <span>{companyTemplatePreviewLoading ? "Preparando…" : "Vista previa"}</span>
                         </button>
                       )}
 
@@ -3799,9 +5219,10 @@ function EmployeeDetail({
                     <div className="space-y-3 pt-1">
                       {matchingFiles.map((fileUploaded) => {
                         const fileTargetUrl = fileUploaded?.file_url || fileUploaded?.url || "";
+                        const fileBaseUrl = API_BASE.replace(/\/api$/, "");
                         const fullFileUrl = fileTargetUrl.startsWith("http")
                           ? fileTargetUrl
-                          : `${API_BASE}${fileTargetUrl.startsWith("/") ? "" : "/"}${fileTargetUrl}`;
+                          : `${fileBaseUrl}${fileTargetUrl.startsWith("/") ? "" : "/"}${fileTargetUrl}`;
 
                         return (
                           <div 
@@ -3878,7 +5299,19 @@ function EmployeeDetail({
       </div>
 
       <div className="rounded-2xl p-6 space-y-4 bg-white border" style={{ borderColor: C.line }}>
-        <h2 className="text-xs font-bold uppercase tracking-wider" style={{ color: C.inkSoft }}>Generación de Documentos y Formatos</h2>
+        <DocumentFormatsStudio
+          token={token}
+          employee={employee}
+          templates={templates}
+          onTemplatesChange={onTemplatesChange}
+          selectedTemplateId={selectedTemplateId}
+          onSelectTemplate={onSelectTemplate}
+          onRefreshDocuments={() => loadEmployeeDocuments(employee.id)}
+        />
+        <div className="rounded-xl border bg-white px-4 py-3" style={{ borderColor: C.line }}>
+          <h2 className="text-sm font-semibold" style={{ color: C.ink }}>Generar documento para {[employee.first_name, employee.last_name_paternal || employee.last_name, employee.last_name_maternal].filter(Boolean).join(" ")}</h2>
+          <p className="mt-1 text-xs" style={{ color: C.inkSoft }}>Selecciona una carta o formato. Se llenará con los datos de este colaborador y su empresa; podrás revisarlo antes de descargarlo.</p>
+        </div>
         
         <div className="p-4 rounded-xl border bg-slate-50 space-y-3" style={{ borderColor: C.line }}>
           <div className="flex items-center gap-2">
@@ -3888,7 +5321,7 @@ function EmployeeDetail({
             </h3>
           </div>
           <p className="text-[11px] text-slate-500 leading-relaxed">
-            Sube una plantilla en formato Word (`.docx`) o HTML con etiquetas como <code>{"{nombre}"}</code>, <code>{"{puesto}"}</code>, <code>{"{actividades_puesto}"}</code>, <code>{"{curp}"}</code>, <code>{"{rfc}"}</code>, <code>{"{salario_mensual}"}</code>, <code>{"{domicilio_personal}"}</code>, etc., y el sistema rellenará los datos de <strong>{employee.first_name} {employee.last_name}</strong> automáticamente.
+            Sube una plantilla en formato Word (`.docx`) o HTML con etiquetas como <code>{"{nombre}"}</code>, <code>{"{puesto}"}</code>, <code>{"{actividades_puesto}"}</code>, <code>{"{curp}"}</code>, <code>{"{rfc}"}</code>, <code>{"{domicilio_empresa}"}</code>, <code>{"{salario_periodo}"}</code>, <code>{"{modalidad_pago}"}</code>, <code>{"{salario_semanal}"}</code>, <code>{"{salario_quincenal}"}</code>, <code>{"{salario_diario}"}</code>, <code>{"{salario_mensual}"}</code> o <code>{"{domicilio_personal}"}</code>. El importe de <code>{"{salario_periodo}"}</code> corresponde a la modalidad elegida para <strong>{employee.first_name} {employee.last_name}</strong>.
           </p>
 
           <form onSubmit={handleUploadAndFillTemplate} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end pt-2">
@@ -3948,19 +5381,20 @@ function EmployeeDetail({
               label="Seleccionar plantilla predefinida"
               value={selectedTemplateId}
               onChange={e => onSelectTemplate && onSelectTemplate(e.target.value)}
-              options={templates}
+              options={templates.filter((template) => !template.is_custom)}
             />
           </div>
           <button
-            disabled={!selectedTemplateId || generating}
-            onClick={onGenerate}
+            disabled={!selectedTemplateId || generating || documentPreviewLoading}
+            onClick={openDocumentPreview}
             className="px-4 py-2.5 rounded-lg text-xs font-semibold text-white flex items-center gap-2 transition-opacity cursor-pointer"
             style={{ background: C.primary, opacity: (!selectedTemplateId || generating) ? 0.5 : 1 }}
           >
-            {generating && <Loader2 size={13} className="animate-spin" />}
-            Generar documento
+            {documentPreviewLoading ? <Loader2 size={13} className="animate-spin" /> : <Eye size={13} />}
+            {documentPreviewLoading ? "Preparando vista…" : "Revisar y generar"}
           </button>
         </div>
+        {documentPreviewError && <p role="alert" className="text-xs text-red-700">{documentPreviewError}</p>}
 
         {selectedTemplateId === "carta_guarderia" && (
           <div className="mt-3 p-3.5 rounded-xl border bg-[#F3F5F4]" style={{ borderColor: C.line }}>
@@ -4110,15 +5544,16 @@ function EmployeeDetail({
             <div className="space-y-1.5">
               {safeDocs.map(doc => {
                 const docTargetUrl = doc.file_url || doc.url || "";
+                const docBaseUrl = API_BASE.replace(/\/api$/, "");
                 const fullDocUrl = docTargetUrl.startsWith("http")
                   ? docTargetUrl
-                  : `${API_BASE}${docTargetUrl.startsWith("/") ? "" : "/"}${docTargetUrl}`;
+                  : `${docBaseUrl}${docTargetUrl.startsWith("/") ? "" : "/"}${docTargetUrl}`;
 
                 return (
                   <div key={doc.id} className="flex justify-between items-center text-xs p-2.5 rounded-lg border bg-white" style={{ borderColor: C.line }}>
                     <div>
                       <p className="font-medium" style={{ color: C.ink }}>{doc.template_name || "Documento generado"}</p>
-                      <p className="text-[10px]" style={{ color: C.inkSoft }}>Emitido el {doc.created_at?.slice(0, 10)}</p>
+                      <p className="text-[10px]" style={{ color: C.inkSoft }}>Emitido el {formatDate(doc.created_at)}</p>
                     </div>
                     <div className="flex items-center gap-2">
                       <a
@@ -4148,8 +5583,79 @@ function EmployeeDetail({
           </div>
         )}
       </div>
+      {isDocumentPreviewOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-3 sm:p-6">
+          <div className="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-slate-100 shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-3">
+              <div><h3 className="text-sm font-semibold text-slate-900">Vista previa · {selectedTemplate?.name || "Documento"}</h3><p className="text-[11px] text-slate-500">Revisa los datos y el contenido antes de generar el PDF.</p></div>
+              <button onClick={() => setIsDocumentPreviewOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X size={18} /></button>
+            </div>
+            <div className="min-h-0 flex-1 bg-slate-200 p-3 sm:p-5">
+              <iframe title={`Vista previa de ${selectedTemplate?.name || "documento"}`} src={documentPreviewUrl} className="h-[62vh] w-full rounded-lg bg-white shadow sm:h-[70vh]" />
+            </div>
+            <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-white px-5 py-3"><button onClick={() => setIsDocumentPreviewOpen(false)} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700">Volver a editar datos</button><button disabled={generating} onClick={() => { setIsDocumentPreviewOpen(false); onGenerate(); }} className="inline-flex items-center gap-2 rounded-lg bg-[#1B4B43] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"><Download size={14} /> {generating ? "Generando…" : "Generar y descargar PDF"}</button></div>
+          </div>
+        </div>
+      )}
+      {companyTemplateChoice && (
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/55 p-4" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget) setCompanyTemplateChoice(null); }}>
+          <section role="dialog" aria-modal="true" aria-labelledby="company-template-choice-title" className="w-full max-w-xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <header className="border-b border-slate-100 bg-gradient-to-r from-[#F3F7F5] to-white px-6 py-5">
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-[#5B6B6E]">Generación de documentos</p>
+              <h2 id="company-template-choice-title" className="mt-1 text-lg font-bold text-[#1B2A2E]">Selecciona el formato</h2>
+              <p className="mt-1 text-xs text-slate-500">{companyTemplateChoice.documentType} para {employee.first_name} {employee.last_name_paternal || employee.last_name}</p>
+            </header>
+            <div className="max-h-[55vh] space-y-2 overflow-y-auto p-5">
+              {companyTemplateChoice.templates.map((template, index) => {
+                const id = String(template.id);
+                const selected = companyTemplateChoice.selectedId === id;
+                return (
+                  <button key={id} type="button" onClick={() => setCompanyTemplateChoice(current => ({ ...current, selectedId: id }))} className={`flex w-full items-start gap-3 rounded-xl border p-4 text-left transition-colors ${selected ? "border-[#1B4B43] bg-[#F3F7F5] ring-1 ring-[#1B4B43]/10" : "border-slate-200 bg-white hover:border-[#B7CBC5] hover:bg-slate-50"}`}>
+                    <span className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${selected ? "bg-[#1B4B43] text-white" : "bg-slate-100 text-slate-500"}`}>{selected ? <Check size={13} /> : index + 1}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-semibold text-slate-800">{template.sub_type || "Formato general"}</span>
+                      <span className="mt-1 block break-words text-xs text-slate-500">{template.file_name || "Plantilla de empresa"}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <footer className="flex justify-end gap-2 border-t border-slate-100 bg-slate-50/70 px-5 py-4">
+              <button type="button" disabled={companyTemplatePreviewLoading} onClick={() => setCompanyTemplateChoice(null)} className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">Cancelar</button>
+              <button type="button" disabled={companyTemplatePreviewLoading || !companyTemplateChoice.selectedId} onClick={() => {
+                const selected = companyTemplateChoice.templates.find(template => String(template.id) === companyTemplateChoice.selectedId);
+                if (selected) generateCompanyTemplatePreview(companyTemplateChoice.documentType, companyTemplateChoice.targetCategory, selected.sub_type);
+              }} className="inline-flex items-center gap-2 rounded-lg bg-[#1B4B43] px-4 py-2.5 text-xs font-semibold text-white shadow-sm hover:bg-[#153B34] disabled:opacity-60">
+                {companyTemplatePreviewLoading ? <Loader2 size={14} className="animate-spin" /> : <Eye size={14} />}
+                {companyTemplatePreviewLoading ? "Preparando vista previa…" : "Continuar"}
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+      {companyTemplatePreview && (
+        <GeneratedCompanyDocumentPreview
+          blob={companyTemplatePreview.blob}
+          filename={companyTemplatePreview.filename}
+          title={companyTemplatePreview.title}
+          employeeId={employee.id}
+          documentType={companyTemplatePreview.title.split(" · ")[0]}
+          token={token}
+          onClose={() => setCompanyTemplatePreview(null)}
+          onSaved={() => loadEmployeeFiles?.(employee.id)}
+        />
+      )}
     </div>
   );
+}
+
+function renderAssistantMessage(text) {
+  return String(text || "").split(/(\*\*[\s\S]+?\*\*)/g).map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    return part.replace(/\*\*/g, "");
+  });
 }
 
 function AIFloatingAssistant({ token, api }) {
@@ -4340,7 +5846,7 @@ function AIFloatingAssistant({ token, api }) {
     } catch (err) {
       setMessages((prev) => [
         ...prev,
-        { sender: "ai", text: "⚠️ No pude conectar con el servicio de IA. Verifica tu conexión." }
+        { sender: "ai", text: `⚠️ ${err.message || "No pude conectar con el servicio de IA. Intenta nuevamente."}` }
       ]);
       setPayloadMood("idle");
     } finally {
@@ -4505,7 +6011,7 @@ function AIFloatingAssistant({ token, api }) {
                           🤖 NúcleoBot
                         </p>
                       )}
-                      <p className="whitespace-pre-line">{m.text}</p>
+                      <p className="whitespace-pre-line">{isAI ? renderAssistantMessage(m.text) : m.text}</p>
                     </div>
                   </div>
                 );

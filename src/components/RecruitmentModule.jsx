@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { jsPDF } from "jspdf";
 import {
   Briefcase, Building2, CalendarDays, Check, Clock3, Download, FileText,
   MapPin, MessageSquare, Pencil, Phone, Plus, RefreshCw, Search, Send,
@@ -38,6 +39,143 @@ function formatDate(value) {
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString("es-MX", { day: "numeric", month: "short", year: "numeric" });
 }
 
+function downloadCvAssessmentReport(assessment, candidate = {}, vacancy = {}) {
+  const doc = new jsPDF({ unit: "pt", format: "letter" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 46;
+  const usableWidth = pageWidth - margin * 2;
+  const bottomLimit = pageHeight - 54;
+  const fullName = [candidate.first_name, candidate.last_name].filter(Boolean).join(" ").trim() || "Candidato sin nombre registrado";
+  const details = Array.isArray(assessment?.criteriaDetails)
+    ? assessment.criteriaDetails
+    : [
+      ...(assessment?.matched || []).map((item) => ({
+        requirement: item.requirement,
+        evidence: item.evidence,
+        status: /parcial|t[eé]rminos/i.test(item.matchType || "") ? "partial" : "evidence",
+        reason: item.matchType === "términos" ? "Coincidencia por términos del criterio; confirma el contexto en el CV." : "Se localizó una coincidencia textual del criterio.",
+      })),
+      ...(assessment?.notFound || []).map((requirement) => ({ requirement, status: "not_found", evidence: "", reason: "No se localizó evidencia textual en el contenido extraído del CV." })),
+    ];
+  const statusLabel = { evidence: "Evidencia localizada", partial: "Coincidencia parcial", not_found: "No localizado", unclear: "Requiere revisión" };
+  const statusColor = { evidence: [22, 101, 70], partial: [161, 98, 7], not_found: [71, 85, 105], unclear: [109, 40, 217] };
+  let y = 46;
+
+  const ensureSpace = (height) => {
+    if (y + height <= bottomLimit) return;
+    doc.addPage();
+    y = 46;
+  };
+  const writeParagraph = (text, { size = 9, color = [51, 65, 85], bold = false, indent = 0, gap = 5 } = {}) => {
+    doc.setFont("helvetica", bold ? "bold" : "normal");
+    doc.setFontSize(size);
+    doc.setTextColor(...color);
+    const lines = doc.splitTextToSize(String(text || "—"), usableWidth - indent);
+    const height = lines.length * (size + 3);
+    ensureSpace(height + gap);
+    doc.text(lines, margin + indent, y);
+    y += height + gap;
+  };
+
+  doc.setFillColor(27, 75, 67);
+  doc.rect(0, 0, pageWidth, 94, "F");
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(10);
+  doc.text("NÚCLEO RH  |  RECLUTAMIENTO", margin, 32);
+  doc.setFontSize(19);
+  doc.text("Informe de análisis curricular", margin, 59);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(`Emitido: ${new Date().toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" })}`, margin, 78);
+  y = 119;
+
+  writeParagraph("DATOS DE LA POSTULACIÓN", { size: 9, color: [27, 75, 67], bold: true, gap: 8 });
+  writeParagraph(`Candidato: ${fullName}`, { bold: true, size: 11, gap: 4 });
+  if (candidate.email) writeParagraph(`Correo: ${candidate.email}`, { gap: 3 });
+  if (candidate.phone) writeParagraph(`Teléfono: ${candidate.phone}`, { gap: 3 });
+  writeParagraph(`Vacante: ${vacancy.title || "No especificada"}`, { gap: 3 });
+  if (vacancy.company_name) writeParagraph(`Empresa: ${vacancy.company_name}`, { gap: 3 });
+  if (candidate.cv_original_name || candidate.cv_name) writeParagraph(`Archivo analizado: ${candidate.cv_original_name || candidate.cv_name}`, { gap: 3 });
+  if (assessment?.evaluated_at) writeParagraph(`Fecha del análisis: ${formatDate(assessment.evaluated_at)}`, { gap: 3 });
+  writeParagraph(`Método: ${assessment?.provider || "Análisis local de texto"}`, { gap: 9 });
+
+  doc.setFillColor(240, 248, 245);
+  doc.roundedRect(margin, y, usableWidth, 66, 6, 6, "F");
+  doc.setTextColor(27, 75, 67);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(24);
+  doc.text(assessment?.available && assessment.coveragePercent != null ? `${assessment.coveragePercent}%` : "N/D", margin + 14, y + 31);
+  doc.setFontSize(9);
+  doc.text("COBERTURA DOCUMENTAL DE CRITERIOS", margin + 92, y + 23);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(51, 65, 85);
+  doc.text(`${details.filter((item) => item.status === "evidence").length} con evidencia  ·  ${details.filter((item) => item.status === "partial").length} parciales  ·  ${details.filter((item) => item.status === "not_found").length} no localizados`, margin + 92, y + 41);
+  y += 79;
+
+  writeParagraph("RESUMEN EJECUTIVO", { size: 9, color: [27, 75, 67], bold: true, gap: 5 });
+  writeParagraph(assessment?.summary || assessment?.reason || "No se generó un resumen para este análisis.", { size: 9, gap: 9 });
+
+  writeParagraph("EVALUACIÓN DETALLADA POR CRITERIO", { size: 9, color: [27, 75, 67], bold: true, gap: 7 });
+  if (!details.length) writeParagraph("No se encontraron criterios comparables en la vacante.", { size: 9 });
+  details.forEach((item, index) => {
+    const status = item.status || "unclear";
+    const evidence = item.evidence ? `Evidencia textual: “${item.evidence}”` : "Evidencia textual: no disponible en el texto extraído.";
+    const itemLines = [
+      `${index + 1}. ${item.requirement || "Criterio sin descripción"}`,
+      `Resultado: ${statusLabel[status] || statusLabel.unclear}`,
+      evidence,
+      item.reason ? `Análisis: ${item.reason}` : "",
+      item.quote_verified === false ? "La cita no se pudo verificar contra el texto del CV." : "",
+    ].filter(Boolean);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    const lines = itemLines.flatMap((line) => doc.splitTextToSize(line, usableWidth - 24));
+    const blockHeight = lines.length * 11 + 18;
+    ensureSpace(blockHeight);
+    doc.setFillColor(248, 250, 252);
+    doc.roundedRect(margin, y - 10, usableWidth, blockHeight, 5, 5, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(15, 23, 42);
+    const criterionLines = doc.splitTextToSize(`${index + 1}. ${item.requirement || "Criterio sin descripción"}`, usableWidth - 120);
+    doc.text(criterionLines, margin + 10, y + 2);
+    doc.setFontSize(7.5);
+    doc.setTextColor(...(statusColor[status] || statusColor.unclear));
+    doc.text(statusLabel[status] || statusLabel.unclear, pageWidth - margin - 10, y + 2, { align: "right" });
+    y += criterionLines.length * 11 + 3;
+    for (const line of itemLines.slice(1)) {
+      if (!line) continue;
+      const wrapped = doc.splitTextToSize(line, usableWidth - 24);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor(51, 65, 85);
+      doc.text(wrapped, margin + 12, y);
+      y += wrapped.length * 11;
+    }
+    y += 13;
+  });
+
+  writeParagraph("ALCANCE Y USO RESPONSABLE", { size: 9, color: [27, 75, 67], bold: true, gap: 5 });
+  writeParagraph(assessment?.note || "El porcentaje representa únicamente la evidencia textual localizada para los requisitos escritos en la vacante. No es una calificación de la persona ni una recomendación de contratación. La extracción puede omitir información en imágenes, tablas, sinónimos o archivos escaneados. Revisa el CV original y confirma el contexto antes de tomar decisiones.", { size: 8, color: [71, 85, 105], gap: 6 });
+  if (assessment?.aiDiagnostic) writeParagraph(`Diagnóstico: ${assessment.aiDiagnostic}`, { size: 8, color: [146, 64, 14], gap: 4 });
+
+  const pageCount = doc.getNumberOfPages();
+  for (let page = 1; page <= pageCount; page += 1) {
+    doc.setPage(page);
+    doc.setDrawColor(226, 232, 240);
+    doc.line(margin, pageHeight - 38, pageWidth - margin, pageHeight - 38);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text("Confidencial · Uso interno de Recursos Humanos", margin, pageHeight - 24);
+    doc.text(`Página ${page} de ${pageCount}`, pageWidth - margin, pageHeight - 24, { align: "right" });
+  }
+  const slug = fullName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_|_$/g, "");
+  doc.save(`Informe_ATS_${slug || "candidato"}.pdf`);
+}
+
 function RecruitmentModule({ token, companies = [], api }) {
   const [vacancies, setVacancies] = useState([]);
   const [selectedVacancyId, setSelectedVacancyId] = useState("");
@@ -64,8 +202,12 @@ function RecruitmentModule({ token, companies = [], api }) {
   const [loadingActivities, setLoadingActivities] = useState(false);
   const [candidateAssessments, setCandidateAssessments] = useState([]);
   const [assessmentType, setAssessmentType] = useState("puesto");
+  const [assessmentMode, setAssessmentMode] = useState("ai");
+  const [assessmentFile, setAssessmentFile] = useState(null);
+  const [assessmentFileTitle, setAssessmentFileTitle] = useState("");
   const [draftAssessment, setDraftAssessment] = useState(null);
   const [generatingAssessment, setGeneratingAssessment] = useState(false);
+  const [uploadingAssessmentFile, setUploadingAssessmentFile] = useState(false);
   const [loadingCandidateAssessment, setLoadingCandidateAssessment] = useState(false);
   const [savingAssessmentDraft, setSavingAssessmentDraft] = useState(false);
   const [sendingAssessmentDraft, setSendingAssessmentDraft] = useState(false);
@@ -87,7 +229,10 @@ function RecruitmentModule({ token, companies = [], api }) {
   const refreshCandidateAssessments = useCallback(async (applicationId = selectedApplication?.id) => {
     if (!applicationId) return [];
     const data = await api.getAtsAssessments(token, applicationId);
-    const list = Array.isArray(data) ? data : [];
+    const list = Array.isArray(data) ? data.map((assessment) => ({
+      ...assessment,
+      fileAssessment: Boolean(assessment.assessment_original_name),
+    })) : [];
     setCandidateAssessments(list);
     setDraftAssessment((current) => {
       if (!current) return null;
@@ -161,7 +306,10 @@ function RecruitmentModule({ token, companies = [], api }) {
     api.getAtsAssessments(token, selectedApplication.id)
       .then((data) => {
         if (!isCurrent) return;
-        const list = Array.isArray(data) ? data : [];
+        const list = Array.isArray(data) ? data.map((assessment) => ({
+          ...assessment,
+          fileAssessment: Boolean(assessment.assessment_original_name),
+        })) : [];
         setCandidateAssessments(list);
         setDraftAssessment((current) => current && list.some((assessment) => assessment.id === current.id && assessment.status === "draft")
           ? list.find((assessment) => assessment.id === current.id)
@@ -335,18 +483,47 @@ function RecruitmentModule({ token, companies = [], api }) {
     }
   }
 
+  async function uploadCandidateAssessmentDraft() {
+    if (!selectedApplication || !assessmentFile) {
+      setError("Selecciona el archivo de la prueba que vas a subir.");
+      return;
+    }
+    setUploadingAssessmentFile(true);
+    setError("");
+    try {
+      const draft = await api.uploadAtsAssessmentDraft(token, selectedApplication.id, {
+        type: effectiveAssessmentType,
+        title: assessmentFileTitle.trim() || assessmentFile.name.replace(/\.[^.]+$/, ""),
+        file: assessmentFile,
+      });
+      const fileDraft = { ...draft, fileAssessment: true };
+      setDraftAssessment(fileDraft);
+      setAssessmentFile(null);
+      setAssessmentFileTitle("");
+      await Promise.all([
+        refreshCandidateAssessments(selectedApplication.id),
+        api.getAtsActivities(token, selectedApplication.id).then((rows) => setActivities(Array.isArray(rows) ? rows : [])),
+      ]);
+      setDraftAssessment(fileDraft);
+      setNotice("Archivo de prueba cargado como borrador. Revísalo antes de enviarlo.");
+    } catch (err) {
+      setError(err.message || "No se pudo cargar el archivo de prueba.");
+    } finally {
+      setUploadingAssessmentFile(false);
+    }
+  }
+
   async function saveCandidateAssessmentDraft() {
     if (!draftAssessment?.id) return;
     setSavingAssessmentDraft(true);
     setError("");
     try {
-      const saved = await api.updateAtsAssessmentDraft(token, draftAssessment.id, {
-        title: draftAssessment.title,
-        questions: draftAssessment.questions,
-      });
-      setDraftAssessment({ ...saved, generationProvider: draftAssessment.generationProvider, generationNote: draftAssessment.generationNote });
+      const payload = { title: draftAssessment.title };
+      if (!draftAssessment.fileAssessment) payload.questions = draftAssessment.questions;
+      const saved = await api.updateAtsAssessmentDraft(token, draftAssessment.id, payload);
+      setDraftAssessment({ ...saved, fileAssessment: draftAssessment.fileAssessment, generationProvider: draftAssessment.generationProvider, generationNote: draftAssessment.generationNote });
       await refreshCandidateAssessments(selectedApplication.id);
-      setDraftAssessment({ ...saved, generationProvider: draftAssessment.generationProvider, generationNote: draftAssessment.generationNote });
+      setDraftAssessment({ ...saved, fileAssessment: draftAssessment.fileAssessment, generationProvider: draftAssessment.generationProvider, generationNote: draftAssessment.generationNote });
       setNotice("Borrador guardado. Todavía no se ha enviado al candidato.");
     } catch (err) {
       setError(err.message || "No se pudo guardar el borrador.");
@@ -364,10 +541,9 @@ function RecruitmentModule({ token, companies = [], api }) {
     setSendingAssessmentDraft(true);
     setError("");
     try {
-      const saved = await api.updateAtsAssessmentDraft(token, draftAssessment.id, {
-        title: draftAssessment.title,
-        questions: draftAssessment.questions,
-      });
+      const payload = { title: draftAssessment.title };
+      if (!draftAssessment.fileAssessment) payload.questions = draftAssessment.questions;
+      const saved = await api.updateAtsAssessmentDraft(token, draftAssessment.id, payload);
       await api.sendAtsAssessmentById(token, saved.id);
       setDraftAssessment(null);
       await Promise.all([
@@ -410,9 +586,25 @@ function RecruitmentModule({ token, companies = [], api }) {
       document.body.appendChild(link);
       link.click();
       link.remove();
-      URL.revokeObjectURL(url);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (err) {
       setError(err.message || "No se pudo descargar el CV.");
+    }
+  }
+
+  async function downloadAssessmentFile(assessment, kind) {
+    try {
+      const { blob, filename } = await api.downloadAtsAssessmentFile(token, assessment.id, kind);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err.message || "No se pudo descargar el archivo de la prueba.");
     }
   }
 
@@ -468,9 +660,9 @@ function RecruitmentModule({ token, companies = [], api }) {
   return (
     <div className="space-y-6" translate="no" lang="es">
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div className="rounded-xl border border-white/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-sm">
           <div className="flex items-center gap-2 mb-1" style={{ color: "#1B4B43" }}>
-            <Briefcase size={21} />
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50"><Briefcase size={20} /></span>
             <h1 className="text-2xl font-semibold">Reclutamiento</h1>
           </div>
           <p className="text-sm" style={{ color: "#5B6B6E" }}>Vacantes, candidatos y seguimiento del proceso de selección.</p>
@@ -640,7 +832,7 @@ function RecruitmentModule({ token, companies = [], api }) {
           <p className="text-[11px] leading-4 text-slate-500">Si hay un proveedor de IA configurado, el texto del CV (que puede contener datos personales) se enviará a ese proveedor para extraer datos y evidencia de requisitos. Si no está disponible o no se configuró, se usará el análisis local.</p>
           {analyzingCv && <p className="text-xs text-slate-500">Leyendo el CV y completando los datos detectados…</p>}
           {cvAnalysisError && <p className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">{cvAnalysisError} Puedes corregir o completar los campos manualmente.</p>}
-          {cvAnalysis && <CvAssessment assessment={cvAnalysis} />}
+          {cvAnalysis && <CvAssessment assessment={cvAnalysis} candidate={{ ...candidateForm, cv_name: candidateForm.cv?.name }} vacancy={selectedVacancy || {}} />}
           <p className="text-[11px] leading-4 text-slate-500">Verifica el nombre y los datos detectados antes de guardar; puedes corregirlos aquí.</p>
           <p className="text-[11px] leading-4 text-slate-500">El CV se guarda en el expediente privado del ATS y solo lo pueden descargar usuarios autorizados.</p>
           <div className="flex justify-end gap-2 border-t border-slate-100 pt-4">
@@ -661,16 +853,23 @@ function RecruitmentModule({ token, companies = [], api }) {
             {selectedApplication.phone && <a href={`tel:${selectedApplication.phone}`} className="flex items-center gap-2"><Phone size={15} className="text-emerald-800" />{selectedApplication.phone}</a>}
             <p className="flex items-center gap-2"><Clock3 size={15} className="text-emerald-800" />Recibido {formatDate(selectedApplication.applied_at)}</p>
             {selectedApplication.source && <p className="text-xs text-slate-500">Fuente: {selectedApplication.source}</p>}
+            {selectedApplication.submitted_by && <p className="text-xs text-slate-500">Enviado por: {selectedApplication.submitted_by}{selectedApplication.applicant_type === "referido" ? " · referencia de colaborador" : " · colaborador"}</p>}
           </div>
           {selectedApplication.cv_analysis
-            ? <CvAssessment assessment={selectedApplication.cv_analysis} />
+            ? <CvAssessment assessment={selectedApplication.cv_analysis} candidate={selectedApplication} vacancy={selectedVacancy || { title: selectedApplication.vacancy_title, company_name: selectedApplication.company_name }} />
             : <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs text-slate-600">{selectedApplication.cv_storage_name ? "Este CV no tiene una evaluación guardada." : "No hay un CV adjunto para consultar."}</p>}
           <section className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-3">
             <div>
               <h4 className="text-sm font-semibold text-slate-800">Pruebas o test</h4>
-              <p className="mt-1 text-[11px] leading-4 text-slate-600">La IA redacta las pruebas del puesto, habilidades blandas e integral con base en descripción, responsabilidades y experiencia solicitada. Excel e inglés usan preguntas por nivel. Todo queda como borrador para que revises y edites las preguntas y claves antes de enviarlas a {selectedApplication.email}.</p>
+              <p className="mt-1 text-[11px] leading-4 text-slate-600">Puedes generar una prueba con las IAs disponibles o subir tu propio archivo. En ambos casos podrás revisar el borrador antes de enviarlo a {selectedApplication.email}. Cuando subas un archivo, el candidato lo descargará desde un enlace seguro y entregará ahí el archivo contestado; RH calificará esa entrega manualmente.</p>
             </div>
             <div className="mt-3 flex flex-wrap items-end gap-2">
+              <Field label="Modalidad">
+                <select value={assessmentMode} onChange={(event) => setAssessmentMode(event.target.value)} className="min-w-56 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
+                  <option value="file">Subir mi propia prueba</option>
+                  <option value="ai">Generar prueba con IA</option>
+                </select>
+              </Field>
               <Field label="Tipo de prueba">
                 <select value={effectiveAssessmentType} onChange={(event) => setAssessmentType(event.target.value)} className="min-w-56 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
                   <option value="puesto">Conocimientos y actividades del puesto</option>
@@ -680,15 +879,30 @@ function RecruitmentModule({ token, companies = [], api }) {
                   <option value="completa">Evaluación integral</option>
                 </select>
               </Field>
-              <button onClick={createCandidateAssessmentDraft} disabled={generatingAssessment || loadingCandidateAssessment} className="flex items-center gap-1.5 rounded-lg bg-[#1B4B43] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
-                <Plus size={14} />{generatingAssessment ? "Generando borrador…" : "Generar borrador"}
-              </button>
+              {assessmentMode === "ai"
+                ? <button onClick={createCandidateAssessmentDraft} disabled={generatingAssessment || loadingCandidateAssessment} className="flex items-center gap-1.5 rounded-lg bg-[#1B4B43] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
+                  <Plus size={14} />{generatingAssessment ? "Generando borrador…" : "Generar borrador con IA"}
+                </button>
+                : <div className="w-full space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+                  <label className="block text-[11px] font-semibold text-slate-700">Título de la prueba
+                    <input value={assessmentFileTitle} maxLength={255} onChange={(event) => setAssessmentFileTitle(event.target.value)} placeholder="Si lo dejas vacío se usará el nombre del archivo" className="mt-1 w-full rounded-md border border-slate-200 px-3 py-2 text-xs font-normal" />
+                  </label>
+                  <label className="block text-[11px] font-semibold text-slate-700">Archivo de prueba (PDF, Word, Excel, PowerPoint o CSV · máximo 15 MB)
+                    <input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.csv" onChange={(event) => setAssessmentFile(event.target.files?.[0] || null)} className="mt-1 block w-full rounded-md border border-slate-200 px-3 py-2 text-xs font-normal" />
+                  </label>
+                  <button onClick={uploadCandidateAssessmentDraft} disabled={!assessmentFile || uploadingAssessmentFile || loadingCandidateAssessment} className="flex items-center gap-1.5 rounded-lg bg-[#1B4B43] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50">
+                    <Plus size={14} />{uploadingAssessmentFile ? "Subiendo archivo…" : "Subir prueba como borrador"}
+                  </button>
+                </div>}
             </div>
             {draftAssessment && <AssessmentDraftEditor
               draft={draftAssessment}
+              candidateName={`${selectedApplication.first_name} ${selectedApplication.last_name}`}
+              vacancyTitle={selectedApplication.vacancy_title}
               onChange={setDraftAssessment}
               onSave={saveCandidateAssessmentDraft}
               onSend={sendCandidateAssessmentDraft}
+              onDownloadTest={() => downloadAssessmentFile(draftAssessment, "test")}
               saving={savingAssessmentDraft}
               sending={sendingAssessmentDraft}
             />}
@@ -701,7 +915,9 @@ function RecruitmentModule({ token, companies = [], api }) {
                       <div><p className="text-xs font-semibold text-slate-800">{assessment.title}</p><p className="mt-1 text-[10px] text-slate-500">{formatDate(assessment.created_at)}</p></div>
                       {assessment.status === "draft" && <button onClick={() => setDraftAssessment(assessment)} className="rounded-md border border-emerald-800 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-800">Editar borrador</button>}
                     </div>
-                    {assessment.status !== "draft" && <AssessmentRecord assessment={assessment} onSaveReview={(reviews) => saveCandidateAssessmentReview(assessment.id, reviews)} savingReview={savingAssessmentReview} />}
+                    {assessment.status !== "draft" && <AssessmentRecord assessment={assessment} candidateName={`${selectedApplication.first_name} ${selectedApplication.last_name}`} vacancyTitle={selectedApplication.vacancy_title} onSaveReview={(reviews) => saveCandidateAssessmentReview(assessment.id, reviews)} savingReview={savingAssessmentReview}
+                      onDownloadTest={() => downloadAssessmentFile(assessment, "test")}
+                      onDownloadSubmission={() => downloadAssessmentFile(assessment, "submission")} />}
                   </div>)}
                 </div> : <p className="text-xs text-slate-500">Aún no hay pruebas generadas para este candidato.</p>}
             </div>
@@ -739,6 +955,7 @@ function CandidateCard({ application, changing, onOpen, onStageChange }) {
       <button className="w-full text-left" onClick={onOpen}>
         <h3 className="text-sm font-semibold text-slate-900">{application.first_name} {application.last_name}</h3>
         <p className="mt-1 truncate text-xs text-slate-500">{application.email}</p>
+        {application.submitted_by && <span className="mt-1 inline-flex rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-700">{application.applicant_type === "referido" ? "Referencia interna" : "Portal interno"}</span>}
         <span className="mt-1 inline-block text-[10px] font-medium text-emerald-800">Abrir expediente y seguimiento</span>
       </button>
       <div className="mt-2 flex items-center justify-between gap-2">
@@ -753,10 +970,15 @@ function CandidateCard({ application, changing, onOpen, onStageChange }) {
   );
 }
 
-function CvAssessment({ assessment }) {
+function CvAssessment({ assessment, candidate = {}, vacancy = {} }) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white p-3">
-      <h4 className="text-sm font-semibold text-slate-800">Análisis del CV frente a la vacante</h4>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h4 className="text-sm font-semibold text-slate-800">Análisis del CV frente a la vacante</h4>
+        <button type="button" onClick={() => downloadCvAssessmentReport(assessment, candidate, vacancy)} className="inline-flex items-center gap-1.5 rounded-lg border border-[#1B4B43]/20 bg-[#1B4B43]/5 px-2.5 py-1.5 text-[11px] font-semibold text-[#1B4B43] hover:bg-[#1B4B43]/10">
+          <Download size={13} /> Descargar informe PDF
+        </button>
+      </div>
       {assessment.provider && <p className="mt-1 text-[10px] text-slate-500">Método: {assessment.provider}</p>}
       {assessment.aiDiagnostic && <p className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">{assessment.aiDiagnostic}</p>}
       {assessment.evaluated_at && <p className="mt-1 text-[10px] text-slate-400">Evaluación guardada {formatDate(assessment.evaluated_at)}</p>}
@@ -818,7 +1040,41 @@ function CvAssessment({ assessment }) {
   );
 }
 
-function AssessmentDraftEditor({ draft, onChange, onSave, onSend, saving, sending }) {
+function CandidateAssessmentPreview({ title, candidateName, vacancyTitle, questions = [], fileAssessment, fileName, fileSize, onDownloadTest }) {
+  return <div className="mx-auto mt-3 max-w-2xl overflow-hidden rounded-xl border border-slate-200 bg-slate-50">
+    <header className="bg-[#1B4B43] p-5 text-white">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-100">Núcleo RH · Evaluación de selección</p>
+      <h3 className="mt-2 text-lg font-bold">{title || "Evaluación"}</h3>
+      {vacancyTitle && <p className="mt-1 text-xs text-emerald-50">Vacante: {vacancyTitle}</p>}
+      {candidateName && <p className="mt-1 text-xs text-emerald-50">Hola, {candidateName}</p>}
+    </header>
+    {fileAssessment ? <section className="m-4 rounded-xl border border-slate-200 bg-white p-4">
+      <h4 className="text-sm font-semibold text-slate-800">Prueba para descargar y contestar</h4>
+      <p className="mt-2 text-xs text-slate-600">El candidato descargará este archivo, lo contestará y adjuntará aquí su entrega.</p>
+      <p className="mt-2 break-all text-xs text-slate-700">Archivo: {fileName || "Archivo de prueba"}{fileSize ? ` · ${(fileSize / (1024 * 1024)).toFixed(1)} MB` : ""}</p>
+      {onDownloadTest && <button type="button" onClick={onDownloadTest} className="mt-3 rounded-lg border border-emerald-800 bg-white px-3 py-2 text-xs font-semibold text-emerald-800">Descargar archivo de prueba</button>}
+    </section> : <div className="space-y-3 p-4">
+      <section className="rounded-xl border border-slate-200 bg-white p-4">
+        <p className="text-xs text-slate-600">Contesta de acuerdo con tu experiencia. Las preguntas abiertas serán revisadas por el equipo de reclutamiento.</p>
+        <p className="mt-2 text-[11px] text-slate-500">Progreso: 0 de {questions.length} respondidas · Aproximadamente {Math.min(90, Math.max(10, questions.length * 4))} minutos</p>
+      </section>
+      {questions.map((question, index) => <article key={question.id || index} className="rounded-xl border border-slate-200 bg-white p-4">
+        <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{question.category || "Pregunta"}</p>
+        <h4 className="mt-1 text-sm font-semibold leading-6 text-slate-900">{index + 1}. {question.prompt || "Escribe aquí el enunciado de la pregunta."}</h4>
+        {question.type === "single_choice" ? <div className="mt-3 space-y-2">
+          {(question.options || []).map((option) => <label key={option.id} className="flex items-start gap-2 rounded-lg border border-slate-200 p-3 text-sm text-slate-700"><input type="radio" disabled className="mt-0.5 accent-emerald-800" /><span>{option.text || "Opción"}</span></label>)}
+        </div> : <div className="mt-3 min-h-24 rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-400">Escribe tu respuesta…</div>}
+      </article>)}
+      <section className="rounded-xl border border-slate-200 bg-white p-4 text-xs text-slate-500">Al enviar, ya no podrás modificar tus respuestas.</section>
+    </div>}
+  </div>;
+}
+
+function AssessmentDraftEditor({ draft, candidateName, vacancyTitle, onChange, onSave, onSend, onDownloadTest, saving, sending }) {
+  const fileAssessment = Boolean(draft.fileAssessment || draft.assessment_original_name);
+  const [previewMode, setPreviewMode] = useState(true);
+  useEffect(() => setPreviewMode(true), [draft.id]);
+
   function updateQuestion(index, changes) {
     onChange((current) => ({
       ...current,
@@ -831,82 +1087,132 @@ function AssessmentDraftEditor({ draft, onChange, onSave, onSend, saving, sendin
     const question = type === "single_choice"
       ? { id, category: "Conocimientos del puesto", type, prompt: "", options: [{ id: "a", text: "" }, { id: "b", text: "" }], correctOptionId: "a", points: 1 }
       : { id, category: "Conocimientos del puesto", type, prompt: "", rubric: "", points: 0 };
-    onChange((current) => ({ ...current, questions: [...current.questions, question] }));
+    onChange((current) => ({ ...current, questions: [...(current.questions || []), question] }));
+    setPreviewMode(false);
   }
 
   return <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
     <div className="flex flex-wrap items-start justify-between gap-2">
-      <div><h5 className="text-sm font-semibold text-slate-800">Revisar borrador antes del envío</h5><p className="mt-1 text-[11px] text-slate-600">{draft.generationProvider === "local" ? "Preguntas creadas por el generador local de respaldo con base en responsabilidades y requisitos de la vacante; no se requiere conexión a una IA externa. " : draft.generationProvider ? `Preguntas creadas con IA ${draft.generationProvider} a partir de la información de la vacante. ` : ""}Edita el título, las preguntas, las opciones y las respuestas correctas. El candidato no verá la clave de respuestas.</p>{draft.generationNote && <p className="mt-1 text-[10px] text-amber-900">La IA externa no estuvo disponible: {draft.generationNote}</p>}<p className="mt-1 text-[10px] text-amber-900">Revisa que cada pregunta corresponda al puesto y que la respuesta marcada sea correcta antes de enviar.</p></div>
-      <span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-amber-900">{draft.questions?.length || 0} preguntas</span>
+      <div><h5 className="text-sm font-semibold text-slate-800">Revisar borrador antes del envío</h5><p className="mt-1 text-[11px] text-slate-600">{fileAssessment ? "Vista previa del archivo que recibirá el candidato." : draft.generationProvider === "local" ? "Preguntas creadas por el generador local de respaldo con base en responsabilidades y requisitos de la vacante. " : draft.generationProvider ? `Preguntas creadas con IA ${draft.generationProvider} a partir de la información de la vacante. ` : ""}{!fileAssessment && "La vista previa muestra cómo verá la prueba el candidato; puedes editar o agregar preguntas antes de enviarla."}</p>{draft.generationNote && <p className="mt-1 text-[10px] text-amber-900">La IA externa no estuvo disponible: {draft.generationNote}</p>}</div>
+      <span className="rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-amber-900">{fileAssessment ? "Archivo adjunto" : `${draft.questions?.length || 0} preguntas`}</span>
     </div>
-    <label className="mt-3 block text-[11px] font-semibold text-slate-700">Título de la prueba
-      <input value={draft.title || ""} maxLength={255} onChange={(event) => onChange((current) => ({ ...current, title: event.target.value }))} className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-normal" />
-    </label>
-    <div className="mt-3 space-y-3">
-      {(draft.questions || []).map((question, index) => <article key={question.id} className="rounded-lg border border-slate-200 bg-white p-3">
-        <div className="flex items-center justify-between gap-2"><span className="text-xs font-semibold text-slate-800">Pregunta {index + 1}</span><button type="button" onClick={() => onChange((current) => ({ ...current, questions: current.questions.filter((_, questionIndex) => questionIndex !== index) }))} disabled={draft.questions.length <= 1} className="text-[11px] font-medium text-rose-700 disabled:opacity-40">Eliminar</button></div>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          <label className="text-[10px] font-semibold text-slate-600">Categoría<input value={question.category || ""} maxLength={120} onChange={(event) => updateQuestion(index, { category: event.target.value })} className="mt-1 w-full rounded border border-slate-200 px-2.5 py-2 text-xs font-normal" /></label>
-          <label className="text-[10px] font-semibold text-slate-600">Tipo de respuesta<select value={question.type} onChange={(event) => updateQuestion(index, event.target.value === "single_choice"
-            ? { type: "single_choice", options: question.options?.length >= 2 ? question.options : [{ id: "a", text: "" }, { id: "b", text: "" }], correctOptionId: question.correctOptionId || "a", points: 1 }
-            : { type: "written", rubric: question.rubric || "", points: 0 })} className="mt-1 w-full rounded border border-slate-200 px-2.5 py-2 text-xs font-normal"><option value="written">Respuesta abierta</option><option value="single_choice">Opción múltiple</option></select></label>
+    {!previewMode ? <>
+      <label className="mt-3 block text-[11px] font-semibold text-slate-700">Título de la prueba
+        <input value={draft.title || ""} maxLength={255} onChange={(event) => onChange((current) => ({ ...current, title: event.target.value }))} className="mt-1 w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-xs font-normal" />
+      </label>
+      {fileAssessment ? <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-3 text-xs">
+        <span className="break-all text-slate-700">{draft.assessment_original_name || "Archivo de prueba"}{draft.assessment_file_size ? ` · ${(draft.assessment_file_size / (1024 * 1024)).toFixed(1)} MB` : ""}</span>
+        <button type="button" onClick={() => onDownloadTest(draft)} className="rounded-md border border-slate-300 px-2.5 py-1.5 font-medium text-slate-700">Descargar para revisar</button>
+      </div> : <div className="mt-3 space-y-3">
+        {(draft.questions || []).map((question, index) => <article key={question.id} className="rounded-lg border border-slate-200 bg-white p-3">
+          <div className="flex items-center justify-between gap-2"><span className="text-xs font-semibold text-slate-800">Pregunta {index + 1}</span><button type="button" onClick={() => onChange((current) => ({ ...current, questions: current.questions.filter((_, questionIndex) => questionIndex !== index) }))} disabled={draft.questions.length <= 1} className="text-[11px] font-medium text-rose-700 disabled:opacity-40">Eliminar</button></div>
+          <div className="mt-2 grid gap-2 sm:grid-cols-2">
+            <label className="text-[10px] font-semibold text-slate-600">Categoría<input value={question.category || ""} maxLength={120} onChange={(event) => updateQuestion(index, { category: event.target.value })} className="mt-1 w-full rounded border border-slate-200 px-2.5 py-2 text-xs font-normal" /></label>
+            <label className="text-[10px] font-semibold text-slate-600">Tipo de respuesta<select value={question.type} onChange={(event) => updateQuestion(index, event.target.value === "single_choice"
+              ? { type: "single_choice", options: question.options?.length >= 2 ? question.options : [{ id: "a", text: "" }, { id: "b", text: "" }], correctOptionId: question.correctOptionId || "a", points: 1 }
+              : { type: "written", rubric: question.rubric || "", points: 0 })} className="mt-1 w-full rounded border border-slate-200 px-2.5 py-2 text-xs font-normal"><option value="written">Respuesta abierta</option><option value="single_choice">Opción múltiple</option></select></label>
+          </div>
+          <label className="mt-2 block text-[10px] font-semibold text-slate-600">Pregunta<textarea value={question.prompt || ""} maxLength={3000} rows={3} onChange={(event) => updateQuestion(index, { prompt: event.target.value })} className="mt-1 w-full resize-y rounded border border-slate-200 px-2.5 py-2 text-xs font-normal" /></label>
+          {question.type === "single_choice" ? <div className="mt-2 space-y-2">
+            {(question.options || []).map((option, optionIndex) => <div key={option.id} className="flex items-center gap-2">
+              <input type="radio" name={`correct-${draft.id}-${question.id}`} checked={question.correctOptionId === option.id} onChange={() => updateQuestion(index, { correctOptionId: option.id })} aria-label={`Marcar opción ${optionIndex + 1} como correcta`} />
+              <input value={option.text} maxLength={500} onChange={(event) => updateQuestion(index, { options: question.options.map((item) => item.id === option.id ? { ...item, text: event.target.value } : item) })} className="min-w-0 flex-1 rounded border border-slate-200 px-2.5 py-2 text-xs" placeholder={`Opción ${optionIndex + 1}`} />
+              {question.options.length > 2 && <button type="button" onClick={() => {
+                const options = question.options.filter((item) => item.id !== option.id);
+                updateQuestion(index, { options, correctOptionId: question.correctOptionId === option.id ? options[0]?.id : question.correctOptionId });
+              }} className="text-xs text-rose-700" aria-label={`Eliminar opción ${optionIndex + 1}`}>×</button>}
+            </div>)}
+            {(question.options || []).length < 8 && <button type="button" onClick={() => updateQuestion(index, { options: [...question.options, { id: crypto.randomUUID(), text: "" }] })} className="text-[11px] font-medium text-emerald-800">+ Agregar opción</button>}
+          </div> : <label className="mt-2 block text-[10px] font-semibold text-slate-600">Rúbrica de evaluación<textarea value={question.rubric || ""} maxLength={2000} rows={2} onChange={(event) => updateQuestion(index, { rubric: event.target.value })} className="mt-1 w-full resize-y rounded border border-slate-200 px-2.5 py-2 text-xs font-normal" /></label>}
+        </article>)}
+      </div>}
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-2">
+          <button type="button" onClick={() => setPreviewMode(true)} className="rounded-md border border-emerald-800 bg-white px-2.5 py-2 text-[11px] font-semibold text-emerald-800">Vista previa como candidato</button>
+          {!fileAssessment && <><button type="button" onClick={() => addQuestion("written")} disabled={(draft.questions || []).length >= 60} className="rounded-md border border-slate-300 bg-white px-2.5 py-2 text-[11px] font-medium text-slate-700 disabled:opacity-50">+ Pregunta abierta</button><button type="button" onClick={() => addQuestion("single_choice")} disabled={(draft.questions || []).length >= 60} className="rounded-md border border-slate-300 bg-white px-2.5 py-2 text-[11px] font-medium text-slate-700 disabled:opacity-50">+ Opción múltiple</button></>}
         </div>
-        <label className="mt-2 block text-[10px] font-semibold text-slate-600">Pregunta<textarea value={question.prompt || ""} maxLength={3000} rows={3} onChange={(event) => updateQuestion(index, { prompt: event.target.value })} className="mt-1 w-full resize-y rounded border border-slate-200 px-2.5 py-2 text-xs font-normal" /></label>
-        {question.type === "single_choice" ? <div className="mt-2 space-y-2">
-          {(question.options || []).map((option, optionIndex) => <div key={option.id} className="flex items-center gap-2">
-            <input type="radio" name={`correct-${draft.id}-${question.id}`} checked={question.correctOptionId === option.id} onChange={() => updateQuestion(index, { correctOptionId: option.id })} aria-label={`Marcar opción ${optionIndex + 1} como correcta`} />
-            <input value={option.text} maxLength={500} onChange={(event) => updateQuestion(index, { options: question.options.map((item) => item.id === option.id ? { ...item, text: event.target.value } : item) })} className="min-w-0 flex-1 rounded border border-slate-200 px-2.5 py-2 text-xs" placeholder={`Opción ${optionIndex + 1}`} />
-            {question.options.length > 2 && <button type="button" onClick={() => {
-              const options = question.options.filter((item) => item.id !== option.id);
-              updateQuestion(index, { options, correctOptionId: question.correctOptionId === option.id ? options[0]?.id : question.correctOptionId });
-            }} className="text-xs text-rose-700" aria-label={`Eliminar opción ${optionIndex + 1}`}>×</button>}
-          </div>)}
-          {(question.options || []).length < 8 && <button type="button" onClick={() => updateQuestion(index, { options: [...question.options, { id: crypto.randomUUID(), text: "" }] })} className="text-[11px] font-medium text-emerald-800">+ Agregar opción</button>}
-        </div> : <label className="mt-2 block text-[10px] font-semibold text-slate-600">Rúbrica de evaluación<textarea value={question.rubric || ""} maxLength={2000} rows={2} onChange={(event) => updateQuestion(index, { rubric: event.target.value })} className="mt-1 w-full resize-y rounded border border-slate-200 px-2.5 py-2 text-xs font-normal" /></label>}
-      </article>)}
-    </div>
-    <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
-      <div className="flex gap-2"><button type="button" onClick={() => addQuestion("written")} disabled={draft.questions.length >= 60} className="rounded-md border border-slate-300 bg-white px-2.5 py-2 text-[11px] font-medium text-slate-700 disabled:opacity-50">+ Pregunta abierta</button><button type="button" onClick={() => addQuestion("single_choice")} disabled={draft.questions.length >= 60} className="rounded-md border border-slate-300 bg-white px-2.5 py-2 text-[11px] font-medium text-slate-700 disabled:opacity-50">+ Opción múltiple</button></div>
-      <div className="flex gap-2"><button type="button" onClick={onSave} disabled={saving || sending} className="rounded-lg border border-emerald-800 bg-white px-3 py-2 text-xs font-semibold text-emerald-800 disabled:opacity-50">{saving ? "Guardando…" : "Guardar borrador"}</button><button type="button" onClick={onSend} disabled={saving || sending || !draft.questions?.length} className="flex items-center gap-1.5 rounded-lg bg-[#1B4B43] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"><Send size={13} />{sending ? "Enviando…" : "Guardar y enviar por correo"}</button></div>
-    </div>
+        <div className="flex gap-2"><button type="button" onClick={onSave} disabled={saving || sending} className="rounded-lg border border-emerald-800 bg-white px-3 py-2 text-xs font-semibold text-emerald-800 disabled:opacity-50">{saving ? "Guardando…" : "Guardar borrador"}</button><button type="button" onClick={onSend} disabled={saving || sending || (!fileAssessment && !draft.questions?.length)} className="flex items-center gap-1.5 rounded-lg bg-[#1B4B43] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"><Send size={13} />{sending ? "Enviando…" : "Guardar y enviar por correo"}</button></div>
+      </div>
+    </> : <>
+      <CandidateAssessmentPreview
+        title={draft.title}
+        candidateName={candidateName}
+        vacancyTitle={vacancyTitle}
+        questions={draft.questions || []}
+        fileAssessment={fileAssessment}
+        fileName={draft.assessment_original_name}
+        fileSize={draft.assessment_file_size}
+        onDownloadTest={() => onDownloadTest(draft)}
+      />
+      <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-2">
+          {!fileAssessment && <><button type="button" onClick={() => addQuestion("written")} disabled={(draft.questions || []).length >= 60} className="rounded-md border border-slate-300 bg-white px-2.5 py-2 text-[11px] font-medium text-slate-700 disabled:opacity-50">+ Pregunta abierta</button><button type="button" onClick={() => addQuestion("single_choice")} disabled={(draft.questions || []).length >= 60} className="rounded-md border border-slate-300 bg-white px-2.5 py-2 text-[11px] font-medium text-slate-700 disabled:opacity-50">+ Opción múltiple</button></>}
+          <button type="button" onClick={() => setPreviewMode(false)} className="rounded-md border border-emerald-800 bg-white px-2.5 py-2 text-[11px] font-semibold text-emerald-800">Editar preguntas</button>
+        </div>
+        <div className="flex gap-2"><button type="button" onClick={onSave} disabled={saving || sending} className="rounded-lg border border-emerald-800 bg-white px-3 py-2 text-xs font-semibold text-emerald-800 disabled:opacity-50">{saving ? "Guardando…" : "Guardar borrador"}</button><button type="button" onClick={onSend} disabled={saving || sending || (!fileAssessment && !draft.questions?.length)} className="flex items-center gap-1.5 rounded-lg bg-[#1B4B43] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"><Send size={13} />{sending ? "Enviando…" : "Guardar y enviar por correo"}</button></div>
+      </div>
+    </>}
   </div>;
 }
 
-function AssessmentRecord({ assessment, onSaveReview, savingReview }) {
+function AssessmentRecord({ assessment, candidateName, vacancyTitle, onSaveReview, savingReview, onDownloadTest, onDownloadSubmission }) {
+  const fileAssessment = Boolean(assessment.fileAssessment || assessment.assessment_original_name);
+  const [isOpen, setIsOpen] = useState(false);
   const [reviews, setReviews] = useState(() => new Map((assessment.manual_review || []).map((review) => [review.questionId, review])));
   useEffect(() => {
     setReviews(new Map((assessment.manual_review || []).map((review) => [review.questionId, review])));
   }, [assessment.id, assessment.manual_review]);
-  const statusLabel = {
+  const completed = assessment.status === "completed";
+  const awaitingReview = completed && Number(assessment.max_manual_score || 0) > 0 && assessment.manual_score == null;
+  const statusLabel = completed ? (awaitingReview ? "Respondida · pendiente de calificar" : "Respondida") : ({
     sent: "Enviada · pendiente",
     sending: "Enviando por correo…",
-    completed: "Completada",
     expired: "Enlace vencido",
     delivery_failed: "No se pudo entregar",
     draft: "Borrador",
-  }[assessment.status] || assessment.status;
+  }[assessment.status] || assessment.status);
   const answers = new Map((Array.isArray(assessment.answers) ? assessment.answers : [])
     .map((answer) => [answer.questionId, answer]));
-  return <div className="mt-3 space-y-2">
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-700">
-      <span className="rounded-full bg-white px-2 py-1 font-semibold">{statusLabel}</span>
-      <span>{assessment.questions?.length || 0} preguntas</span>
+  return <>
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 p-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-700">
+      <span className={`rounded-full px-2 py-1 font-semibold ${completed ? "bg-emerald-100 text-emerald-900" : "bg-white text-slate-700"}`}>{statusLabel}</span>
+      <span>{fileAssessment ? "Prueba por archivo" : `${assessment.questions?.length || 0} preguntas`}</span>
       {assessment.expires_at && assessment.status === "sent" && <span>Vence {formatDate(assessment.expires_at)}</span>}
-      {assessment.status === "completed" && assessment.max_auto_score > 0 && <span>Resultado objetivo: <strong>{assessment.auto_score}/{assessment.max_auto_score}</strong></span>}
+      {completed && !fileAssessment && assessment.max_auto_score > 0 && <span>Objetiva: <strong>{assessment.auto_score}/{assessment.max_auto_score}</strong></span>}
+      {completed && assessment.manual_score != null && assessment.max_manual_score > 0 && <span>Manual: <strong>{assessment.manual_score}/{assessment.max_manual_score}</strong></span>}
+      </div>
+      <button type="button" onClick={() => setIsOpen(true)} className="rounded-md border border-emerald-800 bg-white px-3 py-2 text-[11px] font-semibold text-emerald-800">
+        {completed ? (fileAssessment ? "Revisar entrega" : "Ver respuestas y calificar") : "Vista previa para candidato"}
+      </button>
     </div>
-    {assessment.status === "completed" && <p className="text-[11px] leading-4 text-slate-600">La puntuación excluye las preguntas abiertas. Revisa las respuestas y aplica la rúbrica manual; no es una decisión automática de selección.</p>}
-    {assessment.status === "completed" && <div className="space-y-2">
+    {isOpen && <Modal title={completed ? (fileAssessment ? "Entrega recibida" : "Respuestas del candidato") : "Vista previa para candidato"} onClose={() => setIsOpen(false)}>
+    <div className="space-y-3">
+    {fileAssessment && completed && <div className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 p-3 text-xs">
+      <span className="break-all text-slate-700">Prueba: {assessment.assessment_original_name || "Archivo cargado"}</span>
+      {assessment.assessment_original_name && <button type="button" onClick={onDownloadTest} className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 font-medium">Descargar prueba</button>}
+      {assessment.submission_original_name && <><span className="break-all text-slate-700">Entrega: {assessment.submission_original_name}</span><button type="button" onClick={onDownloadSubmission} className="rounded-md border border-emerald-800 bg-white px-2.5 py-1.5 font-semibold text-emerald-800">Descargar respuesta del candidato</button></>}
+    </div>}
+    {!fileAssessment && completed && <>
+    <div className="rounded-xl bg-emerald-50 p-3 text-xs text-emerald-900">
+      <p className="font-semibold">{assessment.title}</p>
+      <p className="mt-1">Respondida por {candidateName}. Las respuestas abiertas se califican manualmente; el resultado objetivo solo cubre preguntas de opción múltiple.</p>
+      {assessment.max_auto_score > 0 && <p className="mt-1">Resultado objetivo: <strong>{assessment.auto_score}/{assessment.max_auto_score}</strong></p>}
+    </div>
+    <div className="space-y-2">
       {(assessment.questions || []).map((question, index) => {
         const answer = answers.get(question.id);
         const chosenOption = question.options?.find((option) => option.id === answer?.selectedOptionId);
         const correctOption = question.options?.find((option) => option.id === question.correctOptionId);
         return <article key={question.id} className="rounded-lg border border-slate-200 bg-white p-3 text-xs">
-          <p className="font-semibold text-slate-800">{index + 1}. {question.category} · {question.prompt}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-800">{question.category}</p>
+          <p className="mt-1 font-semibold text-slate-800">{index + 1}. {question.prompt}</p>
           {question.type === "single_choice" ? <div className="mt-1 space-y-1 text-slate-600">
             <p>Respuesta: {chosenOption?.text || "Sin respuesta"} · {answer?.selectedOptionId === question.correctOptionId ? <span className="font-semibold text-emerald-700">Correcta</span> : <span className="font-semibold text-rose-700">Incorrecta</span>}</p>
             {answer?.selectedOptionId !== question.correctOptionId && <p>Respuesta esperada: {correctOption?.text}</p>}
           </div> : <>
-            <p className="mt-1 whitespace-pre-wrap text-slate-700">Respuesta del candidato: {answer?.text || "Sin respuesta"}</p>
+            <p className="mt-2 text-[10px] font-semibold uppercase text-slate-500">Respuesta del candidato</p>
+            <p className="mt-1 whitespace-pre-wrap rounded-md bg-slate-50 p-3 text-slate-700">{answer?.text || "Sin respuesta"}</p>
             <p className="mt-2 rounded-md bg-amber-50 p-2 text-[11px] leading-4 text-amber-900"><strong>Rúbrica para revisión manual:</strong> {question.rubric}</p>
             <label className="mt-2 block text-[11px] font-semibold text-slate-700">Puntuación total de rúbrica (0–8)
               <input type="number" min="0" max="8" step="1" value={reviews.get(question.id)?.score ?? ""}
@@ -928,9 +1234,22 @@ function AssessmentRecord({ assessment, onSaveReview, savingReview }) {
           onClick={() => onSaveReview((assessment.questions || []).filter((question) => question.type === "written").map((question) => ({ ...reviews.get(question.id), questionId: question.id, score: Number(reviews.get(question.id).score) })))}
           className="rounded-lg bg-[#1B4B43] px-3 py-2 font-semibold text-white disabled:opacity-50">{savingReview ? "Guardando revisión…" : "Guardar revisión manual"}</button>
       </div>}
-      {assessment.max_manual_score > 0 && <p className="text-right text-xs font-semibold text-slate-700">Puntuación manual: {assessment.manual_score ?? 0}/{assessment.max_manual_score}</p>}
-    </div>}
-  </div>;
+      {assessment.max_manual_score > 0 && <p className="text-right text-xs font-semibold text-slate-700">Calificación manual: {assessment.manual_score ?? 0}/{assessment.max_manual_score}</p>}
+    </div>
+    </>}
+    {!completed && <CandidateAssessmentPreview
+      title={assessment.title}
+      candidateName={candidateName}
+      vacancyTitle={vacancyTitle}
+      questions={assessment.questions || []}
+      fileAssessment={fileAssessment}
+      fileName={assessment.assessment_original_name}
+      fileSize={assessment.assessment_file_size}
+      onDownloadTest={onDownloadTest}
+    />}
+    </div>
+    </Modal>}
+  </>;
 }
 
 function SummaryCard({ label, value, icon }) {

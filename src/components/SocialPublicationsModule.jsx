@@ -1,5 +1,7 @@
 // src/components/SocialPublicationsModule.jsx
 import React, { useState, useEffect } from "react";
+import { API_BASE } from "../api";
+import { formatDate } from "../utils/formatDate";
 import { 
   Share2, Send, Calendar, Clock, CheckCircle2, AlertCircle, 
   Plus, RefreshCw, Loader2, ShieldAlert, Sparkles, Eye, FileText, ArrowLeft, Building2, MapPin, DollarSign, Smartphone, Trash2, Users, ExternalLink, History, Copy, Check, Play, CheckSquare, Square, Edit3, Image
@@ -159,7 +161,7 @@ export function SocialPublicationsModule({ token, user, api }) {
           image_url: post.image_url || null
         });
       } else {
-        await fetch("http://localhost:4000/api/social-publications/templates", {
+        await fetch(`${API_BASE}/social-publications/templates`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -402,9 +404,9 @@ export function SocialPublicationsModule({ token, user, api }) {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-slate-200 pb-4">
-        <div>
+        <div className="rounded-xl border border-white/80 bg-white/90 px-4 py-3 shadow-sm backdrop-blur-sm">
           <h1 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <Share2 className="text-[#1B4B43]" size={24} /> Centro de Publicaciones
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-50"><Share2 className="text-[#1B4B43]" size={22} /></span> Centro de Publicaciones
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
             Administra y distribuye ofertas de empleo a Facebook y canales sociales oficiales.
@@ -538,7 +540,7 @@ export function SocialPublicationsModule({ token, user, api }) {
                         <div className="min-w-0">
                           <p className="font-bold text-slate-900 truncate">{p.title}</p>
                           <p className="text-[11px] text-slate-400 truncate mt-0.5">
-                            Creada el {p.created_at?.slice(0, 10)} · {p.scheduled_at ? `Programada: ${p.scheduled_at.slice(0, 16)}` : `Vacante: ${p.vacancy_title || "General"}`}
+                            Creada el {formatDate(p.created_at)} · {p.scheduled_at ? `Programada: ${formatDate(p.scheduled_at, true)}` : `Vacante: ${p.vacancy_title || "General"}`}
                           </p>
                         </div>
                       </div>
@@ -687,7 +689,7 @@ export function SocialPublicationsModule({ token, user, api }) {
                     <div key={l.id} className="p-3.5 flex items-center justify-between hover:bg-slate-50">
                       <div>
                         <p className="font-bold text-slate-800">{l.action} — <span className="font-normal text-slate-600">{l.message}</span></p>
-                        <p className="text-[10px] text-slate-400 mt-0.5">Por: {l.user_email} ({l.user_position || "Reclutador"}) · {l.created_at?.slice(0, 19).replace('T', ' ')}</p>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Por: {l.user_email} ({l.user_position || "Reclutador"}) · {formatDate(l.created_at, true)}</p>
                       </div>
                       <span className="px-2 py-0.5 bg-slate-100 text-slate-700 text-[10px] font-bold rounded-md">
                         {l.status}

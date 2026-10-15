@@ -25,8 +25,15 @@ export const formatPhotoUrl = (url) => {
   const baseUrl = API_BASE.replace(/\/api$/, "");
   
   if (url.includes("/uploads/")) {
-    const filename = url.split("/uploads/").pop();
-    return `${baseUrl}/uploads/${filename}`;
+    try {
+      const fileUrl = new URL(url, baseUrl);
+      const uploadPath = fileUrl.pathname.slice(fileUrl.pathname.indexOf("/uploads/"));
+      return `${baseUrl}${uploadPath}${fileUrl.search}`;
+    } catch (_error) {
+      const [path, query = ""] = url.split("?");
+      const filename = path.split("/uploads/").pop();
+      return `${baseUrl}/uploads/${filename}${query ? `?${query}` : ""}`;
+    }
   }
   if (url.startsWith("http://") || url.startsWith("https://")) return url;
   const cleanPath = url.startsWith("/") ? url : `/${url}`;
@@ -35,21 +42,86 @@ export const formatPhotoUrl = (url) => {
 
 export const api = {
 
+  getCurrentUser: (token) =>
+    fetch(`${API_BASE}/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "No se pudo validar la sesión")),
+
+  getUserPreferences: (token) =>
+    fetch(`${API_BASE}/user/preferences`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "No se pudieron cargar tus preferencias")),
+
+  searchWallpapers: (token, query) =>
+    fetch(`${API_BASE}/user/wallpapers/search?q=${encodeURIComponent(query)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "No se pudieron buscar fondos")),
+
+  saveUserPreferences: (token, preferences) =>
+    fetch(`${API_BASE}/user/preferences`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(preferences),
+    }).then((res) => handleResponse(res, "No se pudieron guardar tus preferencias")),
+
   // 🟢 MÓDULO: COMUNICADOS / ANUNCIOS
+  getPersonalDashboard: (token) =>
+    fetch(`${API_BASE}/dashboard/personal`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "Error al cargar tus notas y pendientes")),
+
+  savePersonalDashboard: (token, payload) =>
+    fetch(`${API_BASE}/dashboard/personal`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    }).then((res) => handleResponse(res, "Error al guardar tus notas y pendientes")),
+
   getAnnouncements: (token) =>
     fetch(`${API_BASE}/announcements`, {
       headers: { Authorization: `Bearer ${token}` },
     }).then((res) => handleResponse(res, "Error al cargar comunicados")).catch(() => []),
 
   createAnnouncement: (token, payload) =>
-    fetch(`${API_BASE}/announcements`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(payload),
-    }).then((res) => handleResponse(res, "Error al publicar comunicado")),
+    (() => {
+      const formData = new FormData();
+      formData.append("title", payload.title || "");
+      formData.append("content", payload.content || "");
+      formData.append("category", payload.category || "General");
+      formData.append("links", JSON.stringify(payload.links || []));
+      (payload.files || []).forEach(file => formData.append("files", file));
+      return fetch(`${API_BASE}/announcements`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      }).then((res) => handleResponse(res, "Error al publicar aviso"));
+    })(),
+
+  updateAnnouncement: (token, id, payload) => {
+    const formData = new FormData();
+    formData.append("title", payload.title || "");
+    formData.append("content", payload.content || "");
+    formData.append("category", payload.category || "General");
+    formData.append("links", JSON.stringify(payload.links || []));
+    formData.append("remove_attachment_urls", JSON.stringify(payload.removeAttachmentUrls || []));
+    (payload.files || []).forEach(file => formData.append("files", file));
+    return fetch(`${API_BASE}/announcements/${id}`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    }).then((res) => handleResponse(res, "Error al actualizar aviso"));
+  },
+
+  getAnnouncementPermissions: (token) =>
+    fetch(`${API_BASE}/announcements/permissions`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "Error al consultar permisos de avisos")),
 
   deleteAnnouncement: (token, id) =>
     fetch(`${API_BASE}/announcements/${id}`, {
@@ -92,8 +164,15 @@ export const api = {
     fetch(`${API_BASE}/auth/reset-password`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ resetToken, newPassword }),
+      body: JSON.stringify({ token: resetToken, newPassword }),
     }).then((res) => handleResponse(res, "Error al restablecer contraseña")),
+
+  changeOwnPassword: (token, currentPassword, newPassword) =>
+    fetch(`${API_BASE}/auth/change-password`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    }).then((res) => handleResponse(res, "Error al cambiar contraseña")),
 
   getMyProfile: (token) =>
     fetch(`${API_BASE}/employees/me`, {
@@ -201,8 +280,8 @@ export const api = {
     `${API_BASE}/employees/${employeeId}/download-all`,
 
   // Plantillas
-  getTemplates: (token) =>
-    fetch(`${API_BASE}/documents/templates`, {
+  getTemplates: (token, companyId = null) =>
+    fetch(`${API_BASE}/documents/templates${companyId ? `?company_id=${encodeURIComponent(companyId)}` : ""}`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((res) => handleResponse(res, "Error al obtener plantillas"))
@@ -210,9 +289,57 @@ export const api = {
         { id: "constancia_laboral", name: "Constancia Laboral" },
         { id: "carta_recomendacion", name: "Carta de Recomendación" },
         { id: "carta_guarderia", name: "Carta para Guardería (IMSS)" },
+        { id: "carta_probatoria_domicilio", name: "Carta Probatoria de Domicilio (IMSS)" },
         { id: "acta_administrativa", name: "Acta Administrativa (Mala Actuación)" },
         { id: "formato_multiple", name: "Formato Múltiple de Solicitudes" },
       ]),
+
+  saveDocumentTemplate: (token, template, id = null) =>
+    fetch(`${API_BASE}/documents/templates${id ? `/${encodeURIComponent(id)}` : ""}`, {
+      method: id ? "PUT" : "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(template),
+    }).then((res) => handleResponse(res, "Error al guardar el formato")),
+
+  deleteDocumentTemplate: (token, id) =>
+    fetch(`${API_BASE}/documents/templates/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "Error al eliminar el formato")),
+
+  getCompanyDocumentLogo: (token, companyId) =>
+    fetch(`${API_BASE}/documents/company-logo/${encodeURIComponent(companyId)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "Error al cargar el logo de la empresa")),
+
+  uploadCompanyDocumentLogo: (token, companyId, file) => {
+    const formData = new FormData();
+    formData.append("logo", file);
+    return fetch(`${API_BASE}/documents/company-logo/${encodeURIComponent(companyId)}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    }).then((res) => handleResponse(res, "Error al guardar el logo de la empresa"));
+  },
+
+  deleteCompanyDocumentLogo: (token, companyId) =>
+    fetch(`${API_BASE}/documents/company-logo/${encodeURIComponent(companyId)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "Error al eliminar el logo de la empresa")),
+
+  generateCustomDocument: (token, payload) =>
+    fetch(`${API_BASE}/documents/generate-custom`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    }).then((res) => handleResponse(res, "Error al generar el PDF")),
 
   getMultiFormOptions: (token) =>
     fetch(`${API_BASE}/templates/multi-form-options`, {
@@ -242,6 +369,16 @@ export const api = {
       },
       body: JSON.stringify({ employee_id: employeeId, template_id: templateId, ...extraData }),
     }).then((res) => handleResponse(res, "Error al generar el documento")),
+
+  previewDocument: (token, employeeId, templateId, extraData = {}) =>
+    fetch(`${API_BASE}/documents/preview`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ employee_id: employeeId, template_id: templateId, ...extraData }),
+    }).then((res) => handleResponse(res, "Error al preparar la vista previa")),
 
   generateMultiForm: (token, payload) =>
     fetch(`${API_BASE}/documents/multi-form`, {
@@ -353,16 +490,22 @@ export const api = {
       headers: { Authorization: `Bearer ${token}` },
     }).then((res) => handleResponse(res, "Error al eliminar usuario")),
 
+  sendUserAccessEmail: (token, id) =>
+    fetch(`${API_BASE}/users/${id}/send-access-email`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "Error al enviar el acceso por correo")),
+
   // Mensajería
   getContacts: (token) =>
     fetch(`${API_BASE}/chat/contacts`, {
       headers: { Authorization: `Bearer ${token}` },
-    }).then((res) => handleResponse(res, "Error al obtener contactos de chat")).catch(() => []),
+    }).then((res) => handleResponse(res, "Error al obtener contactos de chat")),
 
   getMessages: (token, contactId) =>
     fetch(`${API_BASE}/chat/messages/${contactId}`, {
       headers: { Authorization: `Bearer ${token}` },
-    }).then((res) => handleResponse(res, "Error al cargar mensajes")).catch(() => []),
+    }).then((res) => handleResponse(res, "Error al cargar mensajes")),
 
   sendMessage: (token, recipientId, message) =>
     fetch(`${API_BASE}/chat/messages`, {
@@ -374,10 +517,34 @@ export const api = {
       body: JSON.stringify({ recipient_id: recipientId, message }),
     }).then((res) => handleResponse(res, "Error al enviar mensaje")),
 
+  sendChatContent: (token, recipientId, { message = "", messageType = "text", attachment = null } = {}) => {
+    if (attachment) {
+      const body = new FormData();
+      body.append("recipient_id", recipientId);
+      body.append("message", message);
+      body.append("attachment", attachment);
+      return fetch(`${API_BASE}/chat/messages`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body,
+      }).then((res) => handleResponse(res, "Error al enviar la imagen"));
+    }
+    return fetch(`${API_BASE}/chat/messages`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ recipient_id: recipientId, message, message_type: messageType }),
+    }).then((res) => handleResponse(res, "Error al enviar mensaje"));
+  },
+
   getUnreadCount: (token) =>
     fetch(`${API_BASE}/chat/unread-count`, {
       headers: { Authorization: `Bearer ${token}` },
     }).then((res) => handleResponse(res, "Error al obtener contador de mensajes")).catch(() => ({ count: 0 })),
+
+  getMessageNotifications: (token) =>
+    fetch(`${API_BASE}/chat/notifications`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "Error al obtener notificaciones de mensajes")),
 
   // IA
   askAI: (token, message) =>
@@ -499,6 +666,23 @@ export const api = {
       headers: { Authorization: `Bearer ${token}` },
     }).then((res) => handleResponse(res, "Error al cargar vacantes.")),
 
+  getInternalVacancies: (token) =>
+    fetch(`${API_BASE}/ats/internal/vacancies`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "No se pudieron cargar las vacantes internas.")),
+
+  getMyInternalApplications: (token) =>
+    fetch(`${API_BASE}/ats/internal/my-applications`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "No se pudieron cargar tus postulaciones.")),
+
+  submitInternalApplication: (token, vacancyId, formData) =>
+    fetch(`${API_BASE}/ats/internal/vacancies/${vacancyId}/applications`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    }).then((res) => handleResponse(res, "No se pudo enviar la postulación.")),
+
   createAtsVacancy: (token, payload) =>
     fetch(`${API_BASE}/ats/vacancies`, {
       method: "POST",
@@ -528,6 +712,16 @@ export const api = {
     }).then((res) => handleResponse(res, "Error al cargar candidatos."));
   },
 
+  previewAtsCv: (token, vacancyId, file) => {
+    const formData = new FormData();
+    formData.append("cv", file);
+    return fetch(`${API_BASE}/ats/vacancies/${vacancyId}/cv-preview`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    }).then((res) => handleResponse(res, "No se pudo analizar el CV."));
+  },
+
   createAtsApplication: (token, vacancyId, formData) =>
     fetch(`${API_BASE}/ats/vacancies/${vacancyId}/applications`, {
       method: "POST",
@@ -550,6 +744,91 @@ export const api = {
       headers: { Authorization: `Bearer ${token}` },
     }).then((res) => handleResponse(res, "Error al cargar el seguimiento.")),
 
+  getAtsAssessment: (token, id) =>
+    fetch(`${API_BASE}/ats/applications/${id}/assessment`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "Error al cargar la evaluación.")),
+
+  getAtsAssessments: (token, id) =>
+    fetch(`${API_BASE}/ats/applications/${id}/assessments`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "Error al cargar las pruebas.")),
+
+  createAtsAssessmentDraft: (token, id, type) =>
+    fetch(`${API_BASE}/ats/applications/${id}/assessments/draft`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ type }),
+    }).then((res) => handleResponse(res, "No se pudo generar la prueba.")),
+
+  uploadAtsAssessmentDraft: (token, id, { type, title, file }) => {
+    const body = new FormData();
+    body.append("type", type);
+    body.append("title", title);
+    body.append("testFile", file);
+    return fetch(`${API_BASE}/ats/applications/${id}/assessments/upload`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body,
+    }).then((res) => handleResponse(res, "No se pudo cargar el archivo de prueba."));
+  },
+
+  updateAtsAssessmentDraft: (token, id, draft) =>
+    fetch(`${API_BASE}/ats/assessments/${id}/draft`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify(draft),
+    }).then((res) => handleResponse(res, "No se pudo guardar la prueba.")),
+
+  sendAtsAssessmentById: (token, id) =>
+    fetch(`${API_BASE}/ats/assessments/${id}/send`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "No se pudo enviar la prueba.")),
+
+  downloadAtsAssessmentFile: async (token, id, kind) => {
+    const res = await fetch(`${API_BASE}/ats/assessments/${id}/files/${kind}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) await handleResponse(res, "Error al descargar el archivo de prueba.");
+    const disposition = res.headers.get("content-disposition") || "";
+    const match = disposition.match(/filename\*=UTF-8''([^;]+)|filename="?([^";]+)"?/i);
+    const filename = decodeURIComponent(match?.[1] || match?.[2] || "archivo-prueba");
+    return { blob: await res.blob(), filename };
+  },
+
+  sendAtsAssessment: (token, id) =>
+    fetch(`${API_BASE}/ats/applications/${id}/assessment/send`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "No se pudo enviar la evaluación.")),
+
+  saveAtsAssessmentReview: (token, id, reviews) =>
+    fetch(`${API_BASE}/ats/assessments/${id}/manual-review`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ reviews }),
+    }).then((res) => handleResponse(res, "No se pudo guardar la revisión manual.")),
+
+  getPublicAtsAssessment: (candidateToken) =>
+    fetch(`${API_BASE}/ats/public/assessment`, {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${candidateToken}` },
+    }).then((res) => handleResponse(res, "No se pudo abrir la evaluación.")),
+
+  submitPublicAtsAssessment: (candidateToken, answers) =>
+    fetch(`${API_BASE}/ats/public/assessment/submit`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${candidateToken}`,
+      },
+      body: JSON.stringify({ answers }),
+    }).then((res) => handleResponse(res, "No se pudieron enviar las respuestas.")),
+
   addAtsActivity: (token, id, content) =>
     fetch(`${API_BASE}/ats/applications/${id}/activities`, {
       method: "POST",
@@ -570,4 +849,16 @@ export const api = {
     const filename = decodeURIComponent(match?.[1] || match?.[2] || "CV-candidato");
     return { blob: await res.blob(), filename };
   },
+
+  deleteAtsCv: (token, id) =>
+    fetch(`${API_BASE}/ats/applications/${id}/cv`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "No se pudo eliminar el CV.")),
+
+  deleteAtsApplication: (token, id) =>
+    fetch(`${API_BASE}/ats/applications/${id}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` },
+    }).then((res) => handleResponse(res, "No se pudo eliminar la postulación.")),
 };

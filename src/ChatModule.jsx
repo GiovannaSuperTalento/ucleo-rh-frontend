@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
-import { Send, MessageSquare, Loader2, RefreshCw, Search } from "lucide-react";
+import { Send, MessageSquare, Loader2, RefreshCw, Search, Image as ImageIcon, Smile, X } from "lucide-react";
+import { API_BASE } from "./api";
 
 // 🟢 HELPER RESILIENTE PARA RESOLVER FOTOS O INICIALES EN EL CHAT
 function getChatAvatar(c) {
@@ -10,13 +11,22 @@ function getChatAvatar(c) {
   if (typeof rawPhoto === "string") {
     const clean = rawPhoto.trim();
     if (clean && clean !== "null" && clean !== "undefined") {
-      // 1. Si ya es una URL completa o una Data URI en Base64
-      if (clean.startsWith("http://") || clean.startsWith("https://") || clean.startsWith("data:")) {
+      const baseUrl = API_BASE.replace(/\/api$/, "");
+      // 1. Si ya es una URL completa de nuestro propio servidor o externa (pero no localhost, que ya no existe en producción)
+      if ((clean.startsWith("http://") || clean.startsWith("https://")) && !clean.includes("localhost")) {
         return clean;
       }
-      // 2. Si es una ruta relativa local (p. ej. uploads/foto.jpg)
+      if (clean.startsWith("data:")) {
+        return clean;
+      }
+      // 2. Si incluye "/uploads/" en cualquier parte (ruta relativa o URL vieja de localhost), tomamos solo el nombre del archivo
+      if (clean.includes("/uploads/")) {
+        const filename = clean.split("/uploads/").pop();
+        return `${baseUrl}/uploads/${filename}`;
+      }
+      // 3. Cualquier otra ruta relativa
       const cleanPath = clean.replace(/^public[\\/]/, "").replace(/\\/g, "/");
-      return `http://localhost:4000/${cleanPath.startsWith("/") ? cleanPath.slice(1) : cleanPath}`;
+      return `${baseUrl}/${cleanPath.startsWith("/") ? cleanPath.slice(1) : cleanPath}`;
     }
   }
 
@@ -25,19 +35,27 @@ function getChatAvatar(c) {
   return `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=1B4B43&color=fff`;
 }
 
-export default function ChatModule({ token, user, api }) {
+export default function ChatModule({ token, user, api, unreadBySender = {} }) {
   const [contacts, setContacts] = useState([]);
   const [searchContact, setSearchContact] = useState("");
   const [selectedContact, setSelectedContact] = useState(null);
   const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
+  const [attachment, setAttachment] = useState(null);
+  const [showStickers, setShowStickers] = useState(false);
   const [loadingContacts, setLoadingContacts] = useState(true);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sending, setSending] = useState(false);
+  const [contactsError, setContactsError] = useState("");
+  const [conversationError, setConversationError] = useState("");
   const messagesEndRef = useRef(null);
+  const contactsListRef = useRef(null);
+  const attachmentInputRef = useRef(null);
+  const previousContactOrderRef = useRef("");
 
-  const loadContacts = async () => {
-    setLoadingContacts(true);
+  const loadContacts = async ({ silent = false } = {}) => {
+    if (!silent) setLoadingContacts(true);
+    if (!silent) setContactsError("");
     try {
       if (api.getContacts) {
         const data = await api.getContacts(token);
@@ -45,14 +63,25 @@ export default function ChatModule({ token, user, api }) {
       }
     } catch (err) {
       console.error("Error al cargar contactos:", err);
+      if (!silent) setContactsError(err.message || "No se pudo cargar el directorio.");
     } finally {
-      setLoadingContacts(false);
+      if (!silent) setLoadingContacts(false);
     }
   };
 
   useEffect(() => {
     loadContacts();
+    const interval = setInterval(() => loadContacts({ silent: true }), 5000);
+    return () => clearInterval(interval);
   }, [token]);
+
+  useEffect(() => {
+    const order = contacts.map(contact => String(contact.id)).join(",");
+    if (previousContactOrderRef.current && order !== previousContactOrderRef.current && contactsListRef.current) {
+      contactsListRef.current.scrollTop = 0;
+    }
+    previousContactOrderRef.current = order;
+  }, [contacts]);
 
   const loadMessages = async (contactId) => {
     if (!contactId) return;
@@ -60,9 +89,11 @@ export default function ChatModule({ token, user, api }) {
       if (api.getMessages) {
         const data = await api.getMessages(token, contactId);
         setMessages(Array.isArray(data) ? data : []);
+        setConversationError("");
       }
     } catch (err) {
       console.error("Error al cargar mensajes:", err);
+      setConversationError(err.message || "No se pudo cargar la conversación.");
     }
   };
 
@@ -85,20 +116,40 @@ export default function ChatModule({ token, user, api }) {
 
   const handleSend = async (e) => {
     e.preventDefault();
-    if (!newMessage.trim() || !selectedContact || sending) return;
+    if ((!newMessage.trim() && !attachment) || !selectedContact || sending) return;
 
     const textToSend = newMessage.trim();
     setNewMessage("");
     setSending(true);
 
     try {
-      if (api.sendMessage) {
+      if (api.sendChatContent) {
+        await api.sendChatContent(token, selectedContact.id, { message: textToSend, attachment });
+        setAttachment(null);
+        setShowStickers(false);
+        await loadMessages(selectedContact.id);
+      } else if (api.sendMessage && textToSend) {
         await api.sendMessage(token, selectedContact.id, textToSend);
         await loadMessages(selectedContact.id);
       }
     } catch (err) {
       alert("No se pudo enviar el mensaje: " + err.message);
       setNewMessage(textToSend);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const handleSendSticker = async sticker => {
+    if (!selectedContact || sending) return;
+    setSending(true);
+    setShowStickers(false);
+    try {
+      if (api.sendChatContent) await api.sendChatContent(token, selectedContact.id, { message: sticker, messageType: "sticker" });
+      else await api.sendMessage(token, selectedContact.id, sticker);
+      await loadMessages(selectedContact.id);
+    } catch (err) {
+      alert("No se pudo enviar el sticker: " + err.message);
     } finally {
       setSending(false);
     }
@@ -147,7 +198,7 @@ export default function ChatModule({ token, user, api }) {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-2 space-y-1">
+        <div ref={contactsListRef} className="flex-1 overflow-y-auto p-2 space-y-1">
           {loadingContacts && (
             <div className="flex items-center justify-center py-12 text-slate-400 text-xs gap-2">
               <span className="inline-block animate-spin"><Loader2 size={16} /></span>
@@ -157,7 +208,7 @@ export default function ChatModule({ token, user, api }) {
 
           {!loadingContacts && filteredContacts.length === 0 && (
             <div className="text-center py-12 px-4 text-xs text-slate-400">
-              {searchContact ? "No se encontraron colaboradores." : "No hay colaboradores disponibles."}
+              {contactsError || (searchContact ? "No se encontraron usuarios." : "No hay usuarios disponibles para chatear.")}
             </div>
           )}
 
@@ -194,6 +245,11 @@ export default function ChatModule({ token, user, api }) {
                     {c.position || c.department || c.email}
                   </p>
                 </div>
+                {Number(unreadBySender[String(c.id)] || 0) > 0 && (
+                  <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white">
+                    {unreadBySender[String(c.id)]}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -237,7 +293,7 @@ export default function ChatModule({ token, user, api }) {
               )}
 
               {!loadingMessages && messages.map((m) => {
-                const isMine = m.sender_id === user.id;
+                const isMine = String(m.sender_id) === String(user.id);
                 return (
                   <div key={m.id} className={`flex ${isMine ? "justify-end" : "justify-start"}`}>
                     <div
@@ -247,7 +303,12 @@ export default function ChatModule({ token, user, api }) {
                           : "bg-white border border-slate-200 text-slate-800 rounded-bl-none"
                       }`}
                     >
-                      <p className="whitespace-pre-line">{m.message}</p>
+                      {m.attachment_url && (
+                        <a href={m.attachment_url} target="_blank" rel="noreferrer" className="mb-1 block">
+                          <img src={m.attachment_url} alt="Imagen compartida" className="max-h-72 max-w-full rounded-lg object-contain" loading="lazy" />
+                        </a>
+                      )}
+                      {m.message && <p className={`${m.message_type === "sticker" ? "text-5xl leading-tight" : "whitespace-pre-line"}`}>{m.message}</p>}
                       <p className={`text-[9px] mt-1 text-right ${isMine ? "text-emerald-200/80" : "text-slate-400"}`}>
                         {m.created_at ? new Date(m.created_at).toLocaleTimeString("es-MX", { hour: "2-digit", minute: "2-digit" }) : ""}
                       </p>
@@ -255,10 +316,31 @@ export default function ChatModule({ token, user, api }) {
                   </div>
                 );
               })}
+              {conversationError && (
+                <p role="alert" className="mx-auto max-w-lg rounded-lg bg-rose-50 px-3 py-2 text-center text-xs text-rose-700">
+                  {conversationError}
+                </p>
+              )}
               <div ref={messagesEndRef} />
             </div>
 
+            {showStickers && (
+              <div className="flex flex-wrap gap-2 border-t border-slate-100 bg-white px-3 py-2" aria-label="Stickers">
+                {["😀", "😂", "🥰", "🤗", "🎉", "👍", "👏", "❤️", "🔥", "✨", "😎", "🙌"].map(sticker => (
+                  <button key={sticker} type="button" onClick={() => handleSendSticker(sticker)} aria-label={`Enviar sticker ${sticker}`} className="rounded-lg p-1 text-2xl hover:bg-slate-100">{sticker}</button>
+                ))}
+              </div>
+            )}
+            {attachment && (
+              <div className="flex items-center gap-2 border-t border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                <ImageIcon size={14} /> <span className="min-w-0 flex-1 truncate">{attachment.name}</span>
+                <button type="button" onClick={() => setAttachment(null)} aria-label="Quitar imagen" className="rounded p-1 text-slate-500 hover:bg-white"><X size={14} /></button>
+              </div>
+            )}
             <form onSubmit={handleSend} className="p-3 border-t border-slate-100 flex items-center gap-2 bg-white">
+              <input ref={attachmentInputRef} type="file" accept="image/png,image/jpeg,image/webp,image/gif" className="hidden" onChange={event => { setAttachment(event.target.files?.[0] || null); event.target.value = ""; }} />
+              <button type="button" onClick={() => attachmentInputRef.current?.click()} aria-label="Adjuntar imagen o GIF" title="Adjuntar imagen o GIF" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50"><ImageIcon size={17} /></button>
+              <button type="button" onClick={() => setShowStickers(value => !value)} aria-label="Elegir sticker" title="Elegir sticker" className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 hover:bg-slate-50 ${showStickers ? "bg-emerald-50 text-[#1B4B43]" : "text-slate-600"}`}><Smile size={17} /></button>
               <input
                 type="text"
                 placeholder="Escribe un mensaje..."
@@ -268,7 +350,7 @@ export default function ChatModule({ token, user, api }) {
               />
               <button
                 type="submit"
-                disabled={!newMessage.trim() || sending}
+                disabled={(!newMessage.trim() && !attachment) || sending}
                 className="px-4 py-2.5 bg-[#1B4B43] text-white rounded-xl text-xs font-bold hover:bg-[#12332D] transition-colors disabled:opacity-40 flex items-center gap-1.5 shrink-0"
               >
                 {sending ? (

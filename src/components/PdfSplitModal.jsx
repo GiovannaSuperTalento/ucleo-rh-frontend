@@ -6,12 +6,14 @@ export function PdfSplitModal({ file, onClose, onConfirm, isProcessing }) {
 
   // Lista oficial de categorías del sistema
   const [documentRanges, setDocumentRanges] = useState([
-    { name: "Contrato Firmado", range: "1-3" },
-    { name: "Convenio de Confidencialidad", range: "4-5" },
-    { name: "Aviso de Privacidad", range: "6" },
-    { name: "Test de Integridad", range: "7-8" },
-    { name: "Políticas de RH", range: "9-10" },
-    { name: "Estado de Cuenta Bancaria", range: "11" },
+    { name: "CV / Solicitud de Empleo", range: "" },
+    { name: "Contrato Firmado", range: "" },
+    { name: "ADDENDUM", range: "" },
+    { name: "Convenio de Confidencialidad", range: "" },
+    { name: "Aviso de Privacidad", range: "" },
+    { name: "Test de Integridad", range: "" },
+    { name: "Políticas de RH", range: "" },
+    { name: "Estado de Cuenta Bancaria", range: "" },
     { name: "Identificación Oficial (INE / Pasaporte)", range: "" },
     { name: "Comprobante de Domicilio", range: "" },
     { name: "Acta de Nacimiento", range: "" },
@@ -26,6 +28,7 @@ export function PdfSplitModal({ file, onClose, onConfirm, isProcessing }) {
   // Generar URL Blob segura para la vista previa nativa del navegador
   useEffect(() => {
     if (!file) return;
+    setDocumentRanges(current => current.map(document => ({ ...document, range: "" })));
     const url = URL.createObjectURL(file);
     setPdfUrl(url);
 
