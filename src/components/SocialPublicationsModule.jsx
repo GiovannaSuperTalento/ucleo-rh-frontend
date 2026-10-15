@@ -4,7 +4,7 @@ import { API_BASE } from "../api";
 import { formatDate } from "../utils/formatDate";
 import { 
   Share2, Send, Calendar, Clock, CheckCircle2, AlertCircle, 
-  Plus, RefreshCw, Loader2, ShieldAlert, Sparkles, Eye, FileText, ArrowLeft, Building2, MapPin, DollarSign, Smartphone, Trash2, Users, ExternalLink, History, Copy, Check, Play, CheckSquare, Square, Edit3, Image
+  Plus, RefreshCw, Loader2, ShieldAlert, Sparkles, Eye, FileText, ArrowLeft, Building2, MapPin, DollarSign, Smartphone, Trash2, Users, ExternalLink, History, Copy, Check, Play, CheckSquare, Square, Edit3, Image, MessageCircle
 } from "lucide-react";
 
 export function SocialPublicationsModule({ token, user, api }) {
@@ -117,6 +117,19 @@ export function SocialPublicationsModule({ token, user, api }) {
     navigator.clipboard.writeText(postContent);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleShareOnWhatsApp = (content = postContent) => {
+    const message = String(content || "").trim();
+    if (!message) {
+      alert("Primero agrega el texto de la publicación.");
+      return;
+    }
+
+    // WhatsApp abre el flujo de compartir con el texto precargado; la persona
+    // selecciona el grupo existente y confirma el envío desde WhatsApp.
+    const shareUrl = `https://wa.me/?text=${encodeURIComponent(message)}`;
+    window.open(shareUrl, "_blank", "noopener,noreferrer");
   };
 
   const resetForm = () => {
@@ -289,12 +302,17 @@ export function SocialPublicationsModule({ token, user, api }) {
 
     setSavingSchedule(true);
     try {
+      const scheduledDate = new Date(scheduleDateTime);
+      if (Number.isNaN(scheduledDate.getTime())) {
+        throw new Error("La fecha y hora seleccionadas no son válidas.");
+      }
+      const scheduledAtIso = scheduledDate.toISOString();
       if (api.scheduleSocialPost) {
-        await api.scheduleSocialPost(token, schedulingPost.id, scheduleDateTime);
+        await api.scheduleSocialPost(token, schedulingPost.id, scheduledAtIso);
       } else {
         await api.updateSocialPost(token, schedulingPost.id, {
           status: "Programada",
-          scheduled_at: scheduleDateTime
+          scheduled_at: scheduledAtIso
         });
       }
 
@@ -557,6 +575,14 @@ export function SocialPublicationsModule({ token, user, api }) {
 
                         <div className="flex items-center gap-1">
                           <button
+                            onClick={() => handleShareOnWhatsApp(p.content)}
+                            className="px-2 py-1 bg-green-50 hover:bg-green-100 text-green-800 border border-green-200 rounded-lg text-[10px] font-bold cursor-pointer transition-colors flex items-center gap-1"
+                            title="Abrir WhatsApp con el texto listo; selecciona el grupo y confirma el envío"
+                          >
+                            <MessageCircle size={12} /> WhatsApp
+                          </button>
+
+                          <button
                             onClick={() => handleOpenAssignModal(p)}
                             className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[10px] font-bold cursor-pointer transition-colors flex items-center gap-1"
                             title="Asignar grupos de Facebook"
@@ -798,14 +824,25 @@ export function SocialPublicationsModule({ token, user, api }) {
                 <label className="text-xs font-bold text-slate-800 uppercase tracking-wider">
                   3. Redactar / Editar Contenido
                 </label>
-                <button
-                  type="button"
-                  onClick={handleCopyText}
-                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
-                >
-                  {copied ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
-                  <span>{copied ? "¡Copiado!" : "Copiar Texto"}</span>
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCopyText}
+                    className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[11px] font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                  >
+                    {copied ? <Check size={13} className="text-emerald-600" /> : <Copy size={13} />}
+                    <span>{copied ? "¡Copiado!" : "Copiar Texto"}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleShareOnWhatsApp()}
+                    disabled={!postContent.trim()}
+                    className="px-2.5 py-1 bg-green-50 hover:bg-green-100 text-green-800 border border-green-200 text-[11px] font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    title="Abre WhatsApp para que elijas un grupo y confirmes el envío"
+                  >
+                    <MessageCircle size={13} /> Compartir por WhatsApp
+                  </button>
+                </div>
               </div>
 
               <textarea
@@ -815,6 +852,7 @@ export function SocialPublicationsModule({ token, user, api }) {
                 placeholder="Escribe o selecciona una plantilla..."
                 className="w-full p-3 rounded-xl border border-slate-200 text-xs outline-none focus:border-[#1B4B43] font-mono leading-relaxed"
               />
+              <p className="mt-1 text-[10px] text-slate-500">WhatsApp abrirá con el texto listo. Elige el grupo existente y confirma el envío; las imágenes se adjuntan manualmente.</p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1026,7 +1064,7 @@ export function SocialPublicationsModule({ token, user, api }) {
               <Calendar size={18} className="text-[#1B4B43]" /> Programar Salida de Anuncio
             </h3>
             <p className="text-xs text-slate-500">
-              Selecciona la fecha y hora en la que deseas que la vacante pase a estado <strong>Programada</strong>.
+              Selecciona la hora local a la que debe publicarse. Mantén Chrome abierto, con Facebook conectado y la extensión activa; la carga de Facebook puede ocasionar retrasos.
             </p>
 
             <form onSubmit={handleConfirmSchedule} className="space-y-3 text-xs">
