@@ -58,12 +58,11 @@ const InlineWordEditor = forwardRef(function InlineWordEditor({ fileUrl, onEdit,
     },
   }), []);
 
-  if (loading) return <div className="grid min-h-[55vh] place-items-center text-sm text-slate-600">Preparando las páginas del documento Word…</div>;
-  if (error) return <div className="m-4 rounded-lg bg-red-50 p-4 text-sm text-red-700">No fue posible abrir la vista editable: {error}</div>;
-
   return (
-    <div className="inline-word-editor mx-auto max-h-[67vh] overflow-auto rounded-lg bg-slate-300 p-4" onInput={onEdit}>
+    <div className="inline-word-editor relative mx-auto min-h-[55vh] max-h-[67vh] overflow-auto rounded-lg bg-slate-300 p-4" onInput={onEdit}>
       <div ref={rootRef} className="inline-word-preview-root mx-auto" />
+      {loading && <div className="absolute inset-0 z-10 grid place-items-center bg-slate-200/90 text-sm text-slate-600">Preparando las páginas del documento Word…</div>}
+      {error && <div role="alert" className="absolute inset-x-4 top-4 z-20 rounded-lg bg-red-50 p-4 text-sm text-red-700">No fue posible abrir la vista editable: {error}</div>}
       <style>{`
         .inline-word-preview-root .docx-wrapper { background: transparent; padding: 0; }
         .inline-word-preview-root section.docx { margin: 0 auto 18px; background: white; box-shadow: 0 2px 12px rgba(15,23,42,.16); outline: none; }
