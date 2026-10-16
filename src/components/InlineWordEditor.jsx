@@ -29,7 +29,9 @@ const InlineWordEditor = forwardRef(function InlineWordEditor({ fileUrl, onEdit,
           useBase64URL: true,
         });
         if (!active) return;
-        const pages = rootRef.current.querySelectorAll("section.docx");
+        // docx-preview uses the configured className for each rendered page.
+        // This renderer is configured with "inline-word-page", not its default "docx".
+        const pages = rootRef.current.querySelectorAll("section.inline-word-page");
         if (!pages.length) throw new Error("No se pudieron mostrar las páginas del documento.");
         pages.forEach((page) => {
           page.contentEditable = "true";
@@ -64,11 +66,11 @@ const InlineWordEditor = forwardRef(function InlineWordEditor({ fileUrl, onEdit,
       {loading && <div className="absolute inset-0 z-10 grid place-items-center bg-slate-200/90 text-sm text-slate-600">Preparando las páginas del documento Word…</div>}
       {error && <div role="alert" className="absolute inset-x-4 top-4 z-20 rounded-lg bg-red-50 p-4 text-sm text-red-700">No fue posible abrir la vista editable: {error}</div>}
       <style>{`
-        .inline-word-preview-root .docx-wrapper { background: transparent; padding: 0; }
-        .inline-word-preview-root section.docx { margin: 0 auto 18px; background: white; box-shadow: 0 2px 12px rgba(15,23,42,.16); outline: none; }
-        .inline-word-preview-root section.docx:focus { box-shadow: 0 0 0 2px #1B4B43, 0 2px 12px rgba(15,23,42,.16); }
-        .inline-word-preview-root section.docx * { cursor: text; }
-        @media print { .inline-word-preview-root section.docx { margin: 0; box-shadow: none; } }
+        .inline-word-preview-root .inline-word-page-wrapper { background: transparent; padding: 0; }
+        .inline-word-preview-root section.inline-word-page { margin: 0 auto 18px; background: white; box-shadow: 0 2px 12px rgba(15,23,42,.16); outline: none; }
+        .inline-word-preview-root section.inline-word-page:focus { box-shadow: 0 0 0 2px #1B4B43, 0 2px 12px rgba(15,23,42,.16); }
+        .inline-word-preview-root section.inline-word-page * { cursor: text; }
+        @media print { .inline-word-preview-root section.inline-word-page { margin: 0; box-shadow: none; } }
       `}</style>
     </div>
   );
