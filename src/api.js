@@ -393,6 +393,16 @@ export const api = {
     }).then((res) => handleResponse(res, "Error al guardar el documento editado"));
   },
 
+  saveEditedDocumentWord: (token, metadata) =>
+    fetch(`${API_BASE}/documents/save-edited-word`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(metadata),
+    }).then((res) => handleResponse(res, "Error al guardar el documento Word editado")),
+
   generateMultiForm: (token, payload) =>
     fetch(`${API_BASE}/documents/multi-form`, {
       method: "POST",

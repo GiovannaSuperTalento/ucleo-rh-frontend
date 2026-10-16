@@ -22,7 +22,15 @@ function EditablePdfPage({ page, pageNumber, onEdit, onReady, pageRef }) {
         canvas.height = Math.floor(viewport.height * outputScale);
         canvas.style.width = `${viewport.width}px`;
         canvas.style.height = `${viewport.height}px`;
-        await page.render({ canvas, canvasContext: context, viewport, transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null, background: "#ffffff" }).promise;
+        context.fillStyle = "#ffffff";
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        try {
+          await page.render({ canvas, canvasContext: context, viewport, transform: outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null, background: "#ffffff" }).promise;
+        } catch (canvasError) {
+          canvas.dataset.renderFailed = "true";
+          canvas.parentElement.dataset.textFallback = "true";
+          setRenderError("El fondo del documento no cargó; el texto sigue visible y editable.");
+        }
         if (cancelled) return;
         const textContent = await page.getTextContent();
         const container = textLayerRef.current;
@@ -56,7 +64,7 @@ function EditablePdfPage({ page, pageNumber, onEdit, onReady, pageRef }) {
         textLayer._inlineInputHandlers = inputHandlers;
         onReady();
       } catch (error) {
-        if (!cancelled) setRenderError(error?.message || "No se pudo mostrar esta página.");
+        if (!cancelled) setRenderError("No se pudo cargar la capa de texto de esta página.");
       }
     };
     render();
@@ -75,7 +83,7 @@ function EditablePdfPage({ page, pageNumber, onEdit, onReady, pageRef }) {
     <div ref={pageRef} className="inline-pdf-page relative mx-auto overflow-hidden bg-white shadow-lg" style={{ width: viewport.width, height: viewport.height }}>
       <canvas ref={canvasRef} className="absolute inset-0 block" />
       <div ref={textLayerRef} className="inline-pdf-text-layer absolute inset-0" />
-      {renderError && <div className="absolute inset-0 grid place-items-center bg-white/90 p-5 text-center text-sm text-red-700">{renderError}</div>}
+      {renderError && <span className="absolute left-2 top-2 z-10 rounded bg-amber-50 px-2 py-1 text-[10px] text-amber-900">{renderError}</span>}
       <span className="absolute bottom-2 right-3 rounded bg-white/85 px-2 py-1 text-[10px] text-slate-500">Página {pageNumber}</span>
     </div>
   );

@@ -21,7 +21,7 @@ import GeneratedCompanyDocumentPreview from "./components/GeneratedCompanyDocume
 import { APPEARANCE_THEMES } from "./components/AppearanceSettings";
 import { formatDate } from "./utils/formatDate";
 
-const InlinePdfEditor = React.lazy(() => import("./components/InlinePdfEditor"));
+const InlineWordEditor = React.lazy(() => import("./components/InlineWordEditor"));
 
 const C = {
   bg: "#F3F5F4", surface: "#FFFFFF", ink: "#1B2A2E", inkSoft: "#5B6B6E", line: "#E1E6E4",
@@ -4722,7 +4722,7 @@ function EmployeeDetail({
   const [documentPreviewDirty, setDocumentPreviewDirty] = useState(false);
   const [documentEditorReady, setDocumentEditorReady] = useState(false);
   const [documentSaving, setDocumentSaving] = useState(false);
-  const inlinePdfEditorRef = useRef(null);
+  const inlineWordEditorRef = useRef(null);
   useEffect(() => {
     setShowFullActivities(false);
     setFailedEmployeePhoto("");
@@ -4755,10 +4755,10 @@ function EmployeeDetail({
       });
       const baseUrl = API_BASE.replace(/\/api$/, "");
       const previewResponse = await fetch(result.file_url.startsWith("http") ? result.file_url : `${baseUrl}${result.file_url}`);
-      if (!previewResponse.ok) throw new Error("No se pudo cargar el PDF de vista previa. Vuelve a abrirlo desde el expediente.");
+      if (!previewResponse.ok) throw new Error("No se pudo cargar el Word de vista previa. Vuelve a abrirlo desde el expediente.");
       const previewBlob = await previewResponse.blob();
-      if (!previewBlob.size || (previewBlob.type && !previewBlob.type.includes("pdf"))) {
-        throw new Error("El servidor no devolvió un PDF válido para la vista previa.");
+      if (!previewBlob.size || (previewBlob.type && previewBlob.type.includes("pdf"))) {
+        throw new Error("El servidor no devolvió un documento Word válido para la vista previa.");
       }
       setDocumentPreviewUrl(URL.createObjectURL(previewBlob));
       setDocumentPreviewDirty(false);
@@ -4785,24 +4785,29 @@ function EmployeeDetail({
   };
 
   const saveInlineEditedDocument = async () => {
-    if (!inlinePdfEditorRef.current || !selectedTemplate) return;
+    if (!inlineWordEditorRef.current || !selectedTemplate) return;
     setDocumentSaving(true);
     setDocumentPreviewError("");
     try {
-      const editedPdf = await inlinePdfEditorRef.current.exportEditedPdf();
+      const editedText = inlineWordEditorRef.current.getEditedText();
       const safeName = (selectedTemplate.name || "Documento").replace(/[^\p{L}\p{N}_-]+/gu, "_");
-      const filename = `${safeName}_${employee.id}.pdf`;
-      const file = new File([editedPdf], filename, { type: "application/pdf" });
-      const result = await api.saveEditedDocument(token, {
+      const result = await api.saveEditedDocumentWord(token, {
         employee_id: employee.id,
         template_id: selectedTemplate.template_type_id || selectedTemplateId,
         template_record_id: selectedTemplate.id,
         template_name: selectedTemplate.name,
-      }, file);
-      const downloadUrl = URL.createObjectURL(editedPdf);
+        edited_text: editedText,
+      });
+      const baseUrl = API_BASE.replace(/\/api$/, "");
+      const response = await fetch(result.file_url.startsWith("http") ? result.file_url : `${baseUrl}${result.file_url}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!response.ok) throw new Error("El documento se guardó, pero no se pudo preparar la descarga Word.");
+      const editedWord = await response.blob();
+      const downloadUrl = URL.createObjectURL(editedWord);
       const link = document.createElement("a");
       link.href = downloadUrl;
-      link.download = result.filename || filename;
+      link.download = result.filename || `${safeName}_${employee.id}.docx`;
       document.body.appendChild(link);
       link.click();
       link.remove();
@@ -5612,6 +5617,7 @@ function EmployeeDetail({
                 const fullDocUrl = docTargetUrl.startsWith("http")
                   ? docTargetUrl
                   : `${docBaseUrl}${docTargetUrl.startsWith("/") ? "" : "/"}${docTargetUrl}`;
+                const isWordDocument = /\.docx(?:$|\?)/i.test(docTargetUrl);
 
                 return (
                   <div key={doc.id} className="flex justify-between items-center text-xs p-2.5 rounded-lg border bg-white" style={{ borderColor: C.line }}>
@@ -5622,13 +5628,13 @@ function EmployeeDetail({
                     <div className="flex items-center gap-2">
                       <a
                         href={fullDocUrl}
-                        download={`${doc.template_name || "Documento"}.pdf`}
+                        download={`${doc.template_name || "Documento"}.${isWordDocument ? "docx" : "pdf"}`}
                         target="_blank"
                         rel="noreferrer"
                         className="px-3 py-1.5 rounded-md text-[11px] font-semibold flex items-center gap-1"
                         style={{ background: C.primarySoft, color: C.primary }}
                       >
-                        <Download size={13} /> Ver / Descargar PDF
+                        <Download size={13} /> {isWordDocument ? "Ver / Descargar Word" : "Ver / Descargar PDF"}
                       </a>
                       {api && api.deleteEmployeeDocument && (
                         <button
@@ -5651,17 +5657,17 @@ function EmployeeDetail({
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-3 sm:p-6">
           <div className="flex max-h-[96vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-slate-100 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-3">
-              <div><h3 className="text-sm font-semibold text-slate-900">Editar documento · {selectedTemplate?.name || "Documento"}</h3><p className="text-[11px] text-slate-500">Haz clic sobre las palabras de la hoja para corregirlas directamente.</p></div>
+              <div><h3 className="text-sm font-semibold text-slate-900">Editar documento Word · {selectedTemplate?.name || "Documento"}</h3><p className="text-[11px] text-slate-500">Haz clic en el texto de la hoja y edítalo directamente, como en Word.</p></div>
               <button onClick={closeDocumentPreview} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X size={18} /></button>
             </div>
             <div className="relative min-h-0 flex-1 bg-slate-200 p-3 sm:p-5">
               {documentPreviewLoading && <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-200/80 text-sm font-medium text-slate-700">Preparando documento…</div>}
               {documentPreviewError && <div className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{documentPreviewError}</div>}
-              {documentPreviewUrl && <React.Suspense fallback={<div className="grid min-h-[55vh] place-items-center text-sm text-slate-600">Abriendo editor del documento…</div>}><InlinePdfEditor ref={inlinePdfEditorRef} fileUrl={documentPreviewUrl} onEdit={markPreviewEdited} onReadyChange={setDocumentEditorReady} /></React.Suspense>}
+              {documentPreviewUrl && <React.Suspense fallback={<div className="grid min-h-[55vh] place-items-center text-sm text-slate-600">Abriendo documento Word editable…</div>}><InlineWordEditor ref={inlineWordEditorRef} fileUrl={documentPreviewUrl} onEdit={markPreviewEdited} onReadyChange={setDocumentEditorReady} /></React.Suspense>}
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-5 py-3">
-              <p className="text-[11px] text-slate-500">{documentPreviewDirty ? "Hay cambios editados directamente en la hoja." : "Haz clic en el texto para editarlo. Conserva una longitud similar para cuidar el acomodo."}</p>
-              <div className="flex gap-2"><button onClick={closeDocumentPreview} disabled={documentSaving} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50">Cancelar</button><button disabled={documentSaving || documentPreviewLoading || !documentEditorReady || !documentPreviewDirty} onClick={saveInlineEditedDocument} className="inline-flex items-center gap-2 rounded-lg bg-[#1B4B43] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"><Download size={14} /> {documentSaving ? "Guardando…" : "Guardar y descargar PDF"}</button></div>
+              <p className="text-[11px] text-slate-500">{documentPreviewDirty ? "Los cambios se guardarán como un archivo Word editable." : "Haz clic en cualquier parte del texto para editarlo directamente en la hoja."}</p>
+              <div className="flex gap-2"><button onClick={closeDocumentPreview} disabled={documentSaving} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50">Cancelar</button><button disabled={documentSaving || documentPreviewLoading || !documentEditorReady || !documentPreviewDirty} onClick={saveInlineEditedDocument} className="inline-flex items-center gap-2 rounded-lg bg-[#1B4B43] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"><Download size={14} /> {documentSaving ? "Guardando…" : "Guardar y descargar Word"}</button></div>
             </div>
           </div>
         </div>

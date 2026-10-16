@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 #app-shell,
-#app-shell * {
+#app-shell *:not(.inline-pdf-text-layer):not(.inline-pdf-text-layer *) {
   font-family: var(--user-font-family, Inter, sans-serif) !important;
 }
 
@@ -58,4 +58,8 @@
   box-shadow: 0 0 0 1px rgb(59 130 246 / 55%);
   color: #111827 !important;
   z-index: 4;
+}
+.inline-pdf-page[data-text-fallback="true"] .inline-pdf-text-layer span[contenteditable="true"] {
+  background: #fff;
+  color: #111827 !important;
 }
