@@ -4704,7 +4704,7 @@ function OrgNode({ employee, employees, isRoot = false }) {
 }
 
 function EmployeeDetail({
-  employee, onBack, onEdit, templates = [], documents = [], selectedTemplateId, onSelectTemplate,
+  employee, onBack, onEdit, templates = [], documents = [], selectedTemplateId, onSelectTemplate, generating = false,
   isMultiForm, multiFormOptions = [], checkedOptions = [], onToggleOption, observaciones, onObservacionesChange, fechaSolicitud,
   onFechaSolicitudChange, childName, onChildNameChange, incidentDate, onIncidentDateChange, incidentTime, onIncidentTimeChange,
   incidentLocation, onIncidentLocationChange, witness1, onWitness1Change, witness2, onWitness2Change, photoUploading, onPhotoChange,
