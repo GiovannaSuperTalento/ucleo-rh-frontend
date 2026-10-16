@@ -21,6 +21,8 @@ import GeneratedCompanyDocumentPreview from "./components/GeneratedCompanyDocume
 import { APPEARANCE_THEMES } from "./components/AppearanceSettings";
 import { formatDate } from "./utils/formatDate";
 
+const InlinePdfEditor = React.lazy(() => import("./components/InlinePdfEditor"));
+
 const C = {
   bg: "#F3F5F4", surface: "#FFFFFF", ink: "#1B2A2E", inkSoft: "#5B6B6E", line: "#E1E6E4",
   primary: "var(--user-primary, #1B4B43)", primarySoft: "var(--user-primary-soft, #E7EFEC)", accent: "#C6793D", accentSoft: "#FBEBDC",
@@ -1069,7 +1071,7 @@ function AppInner() {
     setCheckedOptions(prev => prev.includes(opt) ? prev.filter(o => o !== opt) : [...prev, opt]);
   }
 
-  async function generateDocument(previewEdits = null) {
+  async function generateDocument() {
     if (!selectedTemplateId || !selectedEmployee) {
       alert("Por favor selecciona una plantilla de la lista antes de generar.");
       return;
@@ -1080,11 +1082,6 @@ function AppInner() {
       const selectedTemplate = templates.find((template) => template.id === selectedTemplateId);
       const templateTypeId = selectedTemplate?.template_type_id || selectedTemplateId;
       const isMulti = templateTypeId === "formato_multiple";
-      const previewOverrides = previewEdits ? {
-        title_override: previewEdits.title,
-        body_override: previewEdits.body,
-        footer_override: previewEdits.footer,
-      } : {};
       if (isMulti) {
         res = await api.generateDocument(token, selectedEmployee.id, templateTypeId, {
           template_record_id: selectedTemplate?.id,
@@ -1095,7 +1092,6 @@ function AppInner() {
           checked_options: checkedOptions,
           observaciones,
           fecha_solicitud: fechaSolicitud,
-          ...previewOverrides,
         });
         setCheckedOptions([]);
         setObservaciones("");
@@ -1112,8 +1108,7 @@ function AppInner() {
           incident_location: incidentLocation,
           observaciones,
           witness1,
-          witness2,
-          ...previewOverrides
+          witness2
         });
       }
 
@@ -4709,7 +4704,7 @@ function OrgNode({ employee, employees, isRoot = false }) {
 }
 
 function EmployeeDetail({
-  employee, onBack, onEdit, templates = [], documents = [], selectedTemplateId, onSelectTemplate, onGenerate, generating,
+  employee, onBack, onEdit, templates = [], documents = [], selectedTemplateId, onSelectTemplate,
   isMultiForm, multiFormOptions = [], checkedOptions = [], onToggleOption, observaciones, onObservacionesChange, fechaSolicitud,
   onFechaSolicitudChange, childName, onChildNameChange, incidentDate, onIncidentDateChange, incidentTime, onIncidentTimeChange,
   incidentLocation, onIncidentLocationChange, witness1, onWitness1Change, witness2, onWitness2Change, photoUploading, onPhotoChange,
@@ -4724,27 +4719,29 @@ function EmployeeDetail({
   const [documentPreviewUrl, setDocumentPreviewUrl] = useState("");
   const [documentPreviewLoading, setDocumentPreviewLoading] = useState(false);
   const [documentPreviewError, setDocumentPreviewError] = useState("");
-  const [documentPreviewEditorOpen, setDocumentPreviewEditorOpen] = useState(false);
   const [documentPreviewDirty, setDocumentPreviewDirty] = useState(false);
-  const [documentPreviewEdits, setDocumentPreviewEdits] = useState({ title: "", body: "", footer: "" });
+  const [documentEditorReady, setDocumentEditorReady] = useState(false);
+  const [documentSaving, setDocumentSaving] = useState(false);
+  const inlinePdfEditorRef = useRef(null);
   useEffect(() => {
     setShowFullActivities(false);
     setFailedEmployeePhoto("");
   }, [employee?.id]);
   const selectedTemplate = templates.find((item) => item.id === selectedTemplateId);
+  const markPreviewEdited = useCallback(() => setDocumentPreviewDirty(true), []);
   useEffect(() => () => {
     if (documentPreviewUrl.startsWith("blob:")) URL.revokeObjectURL(documentPreviewUrl);
   }, [documentPreviewUrl]);
 
-  const renderDocumentPreview = async (overrides) => {
+  const renderDocumentPreview = async () => {
     setDocumentPreviewLoading(true);
     setDocumentPreviewError("");
     try {
       const result = await api.previewDocument(token, employee.id, selectedTemplate?.template_type_id || selectedTemplateId, {
         template_record_id: selectedTemplate?.id,
-        title_override: overrides?.title ?? selectedTemplate?.title,
-        body_override: overrides?.body ?? selectedTemplate?.content,
-        footer_override: overrides?.footer ?? selectedTemplate?.footer,
+        title_override: selectedTemplate?.title,
+        body_override: selectedTemplate?.content,
+        footer_override: selectedTemplate?.footer,
         include_logo: selectedTemplate?.include_logo,
         child_name: childName,
         incident_date: incidentDate,
@@ -4774,31 +4771,49 @@ function EmployeeDetail({
   };
 
   const openDocumentPreview = () => {
-    const templateType = selectedTemplate?.template_type_id || selectedTemplateId;
-    const recommendationBody = [
-      "A QUIEN CORRESPONDA:",
-      "",
-      "Nos permitimos recomendar ampliamente al/la C. {nombre_completo}, quien colabora en {empresa} desde el día {fecha_ingreso} desempeñando las funciones de {puesto}.",
-      "",
-      "Durante su permanencia ha demostrado aptitudes destacadas de honestidad, puntualidad y constante profesionalismo en las responsabilidades asignadas.",
-      "",
-      "Otorgamos nuestra entera recomendación para los fines laborales o académicos que considere convenientes."
-    ].join("\n");
-    const edits = {
-      title: selectedTemplate?.title || "",
-      body: selectedTemplate?.content || (templateType === "carta_recomendacion" ? recommendationBody : ""),
-      footer: selectedTemplate?.footer || "",
-    };
-    setDocumentPreviewEdits(edits);
-    setDocumentPreviewEditorOpen(false);
-    renderDocumentPreview(edits);
+    setDocumentPreviewError("");
+    setDocumentPreviewDirty(false);
+    setDocumentEditorReady(false);
+    renderDocumentPreview();
   };
 
   const closeDocumentPreview = () => {
     setIsDocumentPreviewOpen(false);
     setDocumentPreviewUrl("");
-    setDocumentPreviewEditorOpen(false);
     setDocumentPreviewDirty(false);
+    setDocumentEditorReady(false);
+  };
+
+  const saveInlineEditedDocument = async () => {
+    if (!inlinePdfEditorRef.current || !selectedTemplate) return;
+    setDocumentSaving(true);
+    setDocumentPreviewError("");
+    try {
+      const editedPdf = await inlinePdfEditorRef.current.exportEditedPdf();
+      const safeName = (selectedTemplate.name || "Documento").replace(/[^\p{L}\p{N}_-]+/gu, "_");
+      const filename = `${safeName}_${employee.id}.pdf`;
+      const file = new File([editedPdf], filename, { type: "application/pdf" });
+      const result = await api.saveEditedDocument(token, {
+        employee_id: employee.id,
+        template_id: selectedTemplate.template_type_id || selectedTemplateId,
+        template_record_id: selectedTemplate.id,
+        template_name: selectedTemplate.name,
+      }, file);
+      const downloadUrl = URL.createObjectURL(editedPdf);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = result.filename || filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(downloadUrl), 1000);
+      await loadEmployeeDocuments(employee.id);
+      closeDocumentPreview();
+    } catch (error) {
+      setDocumentPreviewError(error.message || "No se pudo guardar el documento editado.");
+    } finally {
+      setDocumentSaving(false);
+    }
   };
 
   const REQUIRED_DOCUMENTS = [
@@ -5634,23 +5649,20 @@ function EmployeeDetail({
       </div>
       {isDocumentPreviewOpen && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-3 sm:p-6">
-          <div className="flex max-h-[94vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl bg-slate-100 shadow-2xl">
+          <div className="flex max-h-[96vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-slate-100 shadow-2xl">
             <div className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-3">
-              <div><h3 className="text-sm font-semibold text-slate-900">Vista previa · {selectedTemplate?.name || "Documento"}</h3><p className="text-[11px] text-slate-500">Revisa el PDF y edita el contenido antes de descargarlo.</p></div>
+              <div><h3 className="text-sm font-semibold text-slate-900">Editar documento · {selectedTemplate?.name || "Documento"}</h3><p className="text-[11px] text-slate-500">Haz clic sobre las palabras de la hoja para corregirlas directamente.</p></div>
               <button onClick={closeDocumentPreview} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X size={18} /></button>
             </div>
-            {documentPreviewEditorOpen && <div className="grid shrink-0 gap-3 border-b border-slate-200 bg-white p-4 sm:grid-cols-2">
-              <label className="text-xs font-semibold text-slate-700">Título<input value={documentPreviewEdits.title} onChange={event => { setDocumentPreviewEdits(current => ({ ...current, title: event.target.value })); setDocumentPreviewDirty(true); }} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal" /></label>
-              <label className="text-xs font-semibold text-slate-700 sm:row-span-2">Contenido<textarea value={documentPreviewEdits.body} onChange={event => { setDocumentPreviewEdits(current => ({ ...current, body: event.target.value })); setDocumentPreviewDirty(true); }} rows={7} placeholder="Deja vacío para conservar el contenido predeterminado de la plantilla." className="mt-1 w-full resize-y rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal" /></label>
-              <label className="text-xs font-semibold text-slate-700">Pie de página<input value={documentPreviewEdits.footer} onChange={event => { setDocumentPreviewEdits(current => ({ ...current, footer: event.target.value })); setDocumentPreviewDirty(true); }} className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm font-normal" /></label>
-              <div className="flex items-end sm:col-span-2"><button disabled={documentPreviewLoading} onClick={() => renderDocumentPreview(documentPreviewEdits)} className="rounded-lg bg-[#1B4B43] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50">{documentPreviewLoading ? "Actualizando…" : "Actualizar vista previa"}</button></div>
-            </div>}
             <div className="relative min-h-0 flex-1 bg-slate-200 p-3 sm:p-5">
-              {documentPreviewLoading && <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-200/80 text-sm font-medium text-slate-700">Preparando vista previa…</div>}
+              {documentPreviewLoading && <div className="absolute inset-0 z-10 flex items-center justify-center bg-slate-200/80 text-sm font-medium text-slate-700">Preparando documento…</div>}
               {documentPreviewError && <div className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-700">{documentPreviewError}</div>}
-              {documentPreviewUrl && <iframe title={`Vista previa de ${selectedTemplate?.name || "documento"}`} src={documentPreviewUrl} className="h-[62vh] w-full rounded-lg bg-white shadow sm:h-[70vh]" />}
+              {documentPreviewUrl && <React.Suspense fallback={<div className="grid min-h-[55vh] place-items-center text-sm text-slate-600">Abriendo editor del documento…</div>}><InlinePdfEditor ref={inlinePdfEditorRef} fileUrl={documentPreviewUrl} onEdit={markPreviewEdited} onReadyChange={setDocumentEditorReady} /></React.Suspense>}
             </div>
-            <div className="flex flex-wrap justify-between gap-2 border-t border-slate-200 bg-white px-5 py-3"><button onClick={() => setDocumentPreviewEditorOpen(value => !value)} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700"><Pencil size={14} /> {documentPreviewEditorOpen ? "Ocultar edición" : "Editar contenido"}</button><div className="flex gap-2"><button onClick={closeDocumentPreview} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700">Volver</button><button disabled={generating || documentPreviewLoading || documentPreviewDirty} onClick={() => { closeDocumentPreview(); onGenerate(documentPreviewEdits); }} className="inline-flex items-center gap-2 rounded-lg bg-[#1B4B43] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"><Download size={14} /> {generating ? "Generando…" : documentPreviewDirty ? "Actualiza la vista previa" : "Generar y descargar PDF"}</button></div></div>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 bg-white px-5 py-3">
+              <p className="text-[11px] text-slate-500">{documentPreviewDirty ? "Hay cambios editados directamente en la hoja." : "Haz clic en el texto para editarlo. Conserva una longitud similar para cuidar el acomodo."}</p>
+              <div className="flex gap-2"><button onClick={closeDocumentPreview} disabled={documentSaving} className="rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 disabled:opacity-50">Cancelar</button><button disabled={documentSaving || documentPreviewLoading || !documentEditorReady || !documentPreviewDirty} onClick={saveInlineEditedDocument} className="inline-flex items-center gap-2 rounded-lg bg-[#1B4B43] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"><Download size={14} /> {documentSaving ? "Guardando…" : "Guardar y descargar PDF"}</button></div>
+            </div>
           </div>
         </div>
       )}

@@ -380,6 +380,19 @@ export const api = {
       body: JSON.stringify({ employee_id: employeeId, template_id: templateId, ...extraData }),
     }).then((res) => handleResponse(res, "Error al preparar la vista previa")),
 
+  saveEditedDocument: (token, metadata, file) => {
+    const formData = new FormData();
+    Object.entries(metadata || {}).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) formData.append(key, String(value));
+    });
+    formData.append("file", file, file.name || "documento_editado.pdf");
+    return fetch(`${API_BASE}/documents/save-edited`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: formData,
+    }).then((res) => handleResponse(res, "Error al guardar el documento editado"));
+  },
+
   generateMultiForm: (token, payload) =>
     fetch(`${API_BASE}/documents/multi-form`, {
       method: "POST",

@@ -28,3 +28,34 @@
 #app-shell[data-icon-shape="circle"] button[aria-label]:has(> svg) {
   border-radius: 9999px !important;
 }
+/* Capa de texto alineada sobre las páginas PDF para edición directa en sitio. */
+.inline-pdf-page { isolation: isolate; }
+.inline-pdf-text-layer {
+  line-height: 1;
+  overflow: hidden;
+  text-align: initial;
+  text-size-adjust: none;
+  transform-origin: 0 0;
+  user-select: text;
+  z-index: 2;
+}
+.inline-pdf-text-layer :is(span, br) {
+  color: transparent;
+  cursor: text;
+  position: absolute;
+  transform-origin: 0 0;
+  white-space: pre;
+}
+.inline-pdf-text-layer span[contenteditable="true"] { caret-color: #0f172a; outline: none; }
+.inline-pdf-text-layer span[contenteditable="true"]:hover {
+  background: #fff;
+  color: #334155 !important;
+  z-index: 3;
+}
+.inline-pdf-text-layer span[contenteditable="true"]:focus,
+.inline-pdf-text-layer span[contenteditable="true"][data-edited="true"] {
+  background: #fff;
+  box-shadow: 0 0 0 1px rgb(59 130 246 / 55%);
+  color: #111827 !important;
+  z-index: 4;
+}
